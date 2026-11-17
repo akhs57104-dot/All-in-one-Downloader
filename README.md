@@ -1,7 +1,7 @@
 # TeraBox Downloader
 
-A single-file web app that resolves a public TeraBox share link and downloads
-its files.
+A single-file web app that resolves a public TeraBox share link, lists its
+files, plays videos in the browser, and downloads them.
 
 ## Run
 
@@ -14,29 +14,49 @@ Set `PORT` to change the port.
 
 ## How it works
 
-The app talks to TeraBox's own share API:
+TeraBox no longer hands the bytes of a shared file to an anonymous visitor, so
+the app tries several routes in order and uses the first that works.
+
+Listing (always available):
 
 1. Load the share page to pick up the anonymous session cookies and the page's
    `jsToken`.
 2. `GET /api/shorturlinfo` — reads the share record (`shareid`, `uk`, `sign`,
    `timestamp`) and the file list. This works anonymously.
-3. `GET /api/sharedownload` — mints a short-lived direct `dlink` for a file.
-4. Stream that `dlink` through this server, forwarding cookies and `Range`
-   headers so seeking and resuming work.
+
+Getting the bytes:
+
+1. **TeraBox direct** — `GET /api/sharedownload` mints a short-lived `dlink`,
+   which is streamed through this server. This needs a signed-in cookie (see
+   below); without one TeraBox answers `403 "user not exists"`.
+2. **Helper service** — with no cookie, the app asks a third-party resolver
+   (iteraplay.com) that holds its own TeraBox account. It returns the original
+   file at full quality with `Range` support, so download and playback both
+   work. It is rate-limited (a few files per six hours for an anonymous caller)
+   and it sees every link you paste, so it is a fallback, not the default.
+3. **TeraBox preview** — TeraBox's own `/share/streaming` returns an anonymous
+   HLS transcode, but only a fixed 30-second window, so it is used only to give
+   a short preview when neither of the above can serve the file.
 
 Requests go through `curl_cffi` with browser TLS impersonation, because
 TeraBox's WAF can reject Python's TLS fingerprint before it reads the headers.
 If `curl_cffi` is not installed the app falls back to plain `requests`.
 
+## Configuration
+
+| Variable | Effect |
+|---|---|
+| `PORT` | Port to listen on (default `12000`). |
+| `TERABOX_COOKIE` | A signed-in TeraBox cookie. Enables unlimited direct downloads at full quality. |
+| `TERABOX_FALLBACK` | Set to `off` to disable the third-party helper entirely. |
+| `TERABOX_FALLBACK_TOKEN` | Your own iteraplay `login_token`; raises the helper's quota. |
+
 ## The cookie requirement
 
-Listing files works with no account. Downloading does not: TeraBox now answers
-`403 {"error_code":31045,"error_msg":"user not exists"}` to the `dlink` for an
-anonymous session, and its newer `POST /share/download` endpoint returns
-`errno 400310 "need verify_v2"` (a CAPTCHA).
-
-To download, sign in to TeraBox in a browser, copy the session cookie, and give
-it to the app:
+Listing files works with no account, and the helper service covers downloading
+without one. To download directly from TeraBox — unlimited, no third party, full
+quality — sign in to TeraBox in a browser, copy the session cookie, and give it
+to the app:
 
 ```bash
 export TERABOX_COOKIE='ndus=...'      # full cookie string works too

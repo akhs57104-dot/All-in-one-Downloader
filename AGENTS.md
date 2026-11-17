@@ -25,6 +25,16 @@ share link and downloads its files. `README.md` documents usage.
   session. The newer `POST /share/download` answers
   `errno 400310 "need verify_v2"` (a CAPTCHA). Set `TERABOX_COOKIE` to a
   logged-in cookie to download.
+- **Helper fallback (no cookie).** iteraplay.com holds its own TeraBox account
+  and returns the original file at full quality with `Range` support. Guest
+  quota: 5 resolutions per 6 hours (`429 usage_limit`). `_fallback_files` in the
+  app; a `TERABOX_FALLBACK_TOKEN` (its `login_token` cookie) raises the quota.
+- **TeraBox's own `/share/streaming` is a 30-second preview only.** With a
+  valid `sign`/`timestamp` and `type=M3U8_AUTO_480` it returns an HLS playlist,
+  but always exactly three segments then `#EXT-X-ENDLIST`, whatever the file
+  length; `start_ply` slides the window rather than extending it. 720p
+  (`M3U8_MP4_264_1080`) answers `errno 130`. Good for a preview, never a
+  download.
 - The `surl` is spelled differently by different endpoints: `/s/1abc` path form
   for the share page, `?surl=abc` (no leading `1`) for some endpoints, and
   `shorturl=1abc` (with the `1`) for `/api/shorturlinfo`.
