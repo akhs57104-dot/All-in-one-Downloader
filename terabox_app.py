@@ -849,222 +849,406 @@ INDEX_HTML = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TeraBox Downloader</title>
 <style>
-  :root { --bg:#f0f4f8; --card:#fff; --primary:#007bff; --text:#22313f; --muted:#6b7c8f; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-         background:var(--bg); color:var(--text); display:flex; justify-content:center; padding:32px 16px; }
-  .app { width:100%; max-width:680px; }
-  h1 { font-size:1.5rem; margin:0 0 4px; color:var(--primary); }
-  .sub { color:var(--muted); font-size:.85rem; margin-bottom:20px; }
-  .card { background:var(--card); border-radius:12px; padding:20px; box-shadow:0 1px 3px rgba(16,42,67,.12); margin-bottom:16px; }
-  label { display:block; font-size:.8rem; font-weight:600; margin-bottom:6px; }
-  input[type=text] { width:100%; padding:11px 12px; border:1px solid #cbd6e2; border-radius:8px; font-size:.95rem; }
-  input[type=text]:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px rgba(0,123,255,.15); }
-  .row { display:flex; gap:10px; margin-top:12px; }
-  button { border:0; border-radius:8px; padding:11px 18px; font-size:.9rem; font-weight:600; cursor:pointer; }
-  .primary { background:var(--primary); color:#fff; flex:1; }
-  .primary:disabled { background:#9cc4ec; cursor:default; }
-  .ghost { background:#e7eef7; color:var(--text); }
-  #status { font-size:.85rem; color:var(--muted); min-height:20px; margin-top:10px; }
-  .error { color:#c0392b; }
-  .files { margin-top:16px; }
-  .file { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 12px;
-          border:1px solid #e2eaf2; border-radius:8px; margin-bottom:8px; }
-  .file .meta { min-width:0; }
-  .file .name { font-size:.9rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .file .size { font-size:.78rem; color:var(--muted); }
-  .file .actions { display:flex; gap:8px; flex-shrink:0; }
-  .file a, .file button { text-decoration:none; background:var(--primary); color:#fff; padding:8px 14px;
-            border-radius:8px; font-size:.82rem; font-weight:600; border:0; cursor:pointer; }
-  .file .play { background:#16a34a; }
-  .hidden { display:none !important; }
-  .note { background:#eefaf0; border:1px solid #b7e4c1; color:#1f5f36; border-radius:10px;
-          padding:12px 14px; font-size:.82rem; line-height:1.45; margin-bottom:16px; }
-  .note code { background:#d6f0dd; padding:1px 5px; border-radius:4px; font-size:.8rem; }
-  .card-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
-  .card-head label { margin:0; }
-  .link-btn { background:none; border:0; color:var(--primary); font-size:.8rem; font-weight:600;
-              cursor:pointer; padding:4px 6px; }
-  .empty { color:var(--muted); font-size:.83rem; padding:4px 0; }
+  :root{
+    --bg:#0a0f1c; --bg-2:#0e1526; --surface:#131c31; --surface-2:#1a2540;
+    --border:#25324f; --border-2:#31415f;
+    --text:#e9eefb; --muted:#93a4c4; --muted-2:#6b7da0;
+    --primary:#6366f1; --primary-2:#8b5cf6; --accent:#22d3ee;
+    --success:#22c55e; --danger:#ef4444; --warn:#f59e0b;
+    --radius:14px; --radius-sm:10px;
+    --shadow:0 18px 40px -18px rgba(0,0,0,.75);
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Helvetica,Arial,sans-serif;
+       color:var(--text);background:
+         radial-gradient(1200px 600px at 10% -10%,rgba(99,102,241,.18),transparent 60%),
+         radial-gradient(900px 500px at 100% 0%,rgba(139,92,246,.14),transparent 55%),
+         var(--bg);
+       display:flex;justify-content:center;padding:26px 16px 60px;-webkit-font-smoothing:antialiased;}
+  .app{width:100%;max-width:760px;}
 
-  /* History */
-  .hist-item { display:flex; align-items:center; gap:12px; padding:9px 10px; border:1px solid #e2eaf2;
-               border-radius:8px; margin-bottom:8px; }
-  .hist-badge { flex-shrink:0; width:30px; height:30px; border-radius:8px; display:flex;
-                align-items:center; justify-content:center; font-size:14px; background:#e7eef7; }
-  .hist-badge.played { background:#dcfce7; }
-  .hist-badge.downloaded { background:#dbeafe; }
-  .hist-meta { min-width:0; flex:1; }
-  .hist-name { font-size:.86rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .hist-sub { font-size:.74rem; color:var(--muted); }
-  .hist-actions { display:flex; gap:6px; flex-shrink:0; }
-  .hist-actions button { background:#e7eef7; color:var(--text); padding:6px 11px; font-size:.76rem; }
-  .hist-actions .play { background:#16a34a; color:#fff; }
+  /* topbar */
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:20px;}
+  .brand{display:flex;align-items:center;gap:13px;min-width:0;}
+  .logo{width:44px;height:44px;flex-shrink:0;border-radius:13px;display:flex;align-items:center;justify-content:center;
+        font-weight:800;font-size:1rem;letter-spacing:.5px;color:#fff;
+        background:linear-gradient(135deg,var(--primary),var(--primary-2));
+        box-shadow:0 10px 24px -10px rgba(99,102,241,.9);}
+  .brand h1{font-size:1.22rem;margin:0;letter-spacing:-.2px;}
+  .brand .sub{color:var(--muted);font-size:.78rem;margin-top:2px;}
+  .icon-btn{background:var(--surface);border:1px solid var(--border);color:var(--muted);width:38px;height:38px;
+            border-radius:11px;cursor:pointer;font-size:1rem;font-weight:700;display:flex;align-items:center;
+            justify-content:center;transition:.15s;}
+  .icon-btn:hover{color:var(--text);border-color:var(--border-2);background:var(--surface-2);}
 
-  /* Player */
-  #player { position:fixed; inset:0; background:rgba(6,14,24,.9); display:flex; align-items:center;
-            justify-content:center; padding:16px; z-index:50; }
-  #player .box { background:#0b1520; border-radius:14px; width:min(1040px,100%); overflow:hidden;
-                 box-shadow:0 24px 60px rgba(0,0,0,.55); display:flex; flex-direction:column; }
-  #player .head { display:flex; align-items:center; gap:12px; padding:12px 16px; color:#eaf1f8; }
-  #player .head .t { flex:1; font-size:.92rem; font-weight:600; overflow:hidden;
-                     text-overflow:ellipsis; white-space:nowrap; }
-  #player .head .tag { font-size:.7rem; color:#8fb0cc; border:1px solid #274054; border-radius:999px;
-                       padding:2px 9px; flex-shrink:0; }
-  #player .head .icon-btn { background:transparent; color:#cfe0ef; padding:6px 9px; font-size:1rem; }
-  #player .stage { position:relative; background:#000; }
-  #player video { width:100%; display:block; background:#000; max-height:74vh; }
-  #player .spinner { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-                     pointer-events:none; }
-  #player .spinner::after { content:""; width:42px; height:42px; border-radius:50%;
-        border:3px solid rgba(255,255,255,.25); border-top-color:#fff; animation:spin .8s linear infinite; }
-  @keyframes spin { to { transform:rotate(360deg); } }
-  #player .controls { display:flex; flex-direction:column; gap:6px; padding:10px 14px 14px;
-                      background:#0b1520; }
-  #player .seek { width:100%; -webkit-appearance:none; appearance:none; height:5px; border-radius:3px;
-                  background:#22384f; cursor:pointer; outline:none; }
-  #player .seek::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px; border-radius:50%;
-                  background:var(--primary); cursor:pointer; }
-  #player .seek::-moz-range-thumb { width:13px; height:13px; border:0; border-radius:50%;
-                  background:var(--primary); cursor:pointer; }
-  #player .ctrl-row { display:flex; align-items:center; gap:12px; color:#dbe7f2; }
-  #player .ctrl-row button { background:transparent; color:#dbe7f2; padding:6px 8px; font-size:1rem; }
-  #player .ctrl-row button:hover { color:#fff; }
-  #player .time { font-size:.78rem; font-variant-numeric:tabular-nums; color:#a9c1d6; min-width:96px; }
-  #player .spacer { flex:1; }
-  #player select { background:#16283a; color:#dbe7f2; border:1px solid #274054; border-radius:6px;
-                   padding:5px 8px; font-size:.78rem; }
-  #player .vol { width:80px; -webkit-appearance:none; appearance:none; height:4px; border-radius:3px;
-                 background:#22384f; cursor:pointer; }
-  #player .vol::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px; border-radius:50%;
-                 background:#dbe7f2; cursor:pointer; }
-  #player .pmsg { color:#a9c1d6; font-size:.8rem; padding:0 16px 14px; min-height:1em; }
+  .card{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);
+        border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);margin-bottom:16px;}
+  label{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin-bottom:8px;letter-spacing:.2px;}
+  .input-wrap{display:flex;gap:8px;}
+  input[type=text]{flex:1;min-width:0;padding:12px 13px;border:1px solid var(--border);border-radius:var(--radius-sm);
+       font-size:.92rem;background:var(--bg-2);color:var(--text);transition:.15s;}
+  input[type=text]::placeholder{color:var(--muted-2);}
+  input[type=text]:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.22);}
+  .row{display:flex;gap:10px;margin-top:12px;}
+  button{font-family:inherit;}
+  .btn{border:1px solid transparent;border-radius:var(--radius-sm);padding:12px 18px;font-size:.88rem;font-weight:600;
+       cursor:pointer;display:inline-flex;align-items:center;gap:8px;justify-content:center;transition:.15s;white-space:nowrap;}
+  .btn svg{width:16px;height:16px;fill:currentColor;flex-shrink:0;}
+  .primary{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;flex:1;
+           box-shadow:0 12px 26px -14px rgba(99,102,241,.95);}
+  .primary:hover{filter:brightness(1.08);}
+  .primary:disabled{opacity:.55;cursor:default;filter:none;box-shadow:none;}
+  .ghost{background:var(--surface-2);color:var(--text);border-color:var(--border);}
+  .ghost:hover{border-color:var(--border-2);background:#1f2c4a;}
+  .sm{padding:9px 13px;font-size:.8rem;border-radius:9px;}
+  .status{font-size:.83rem;color:var(--muted);min-height:18px;margin-top:11px;}
+  .status.error{color:var(--danger);}
+
+  .note{background:linear-gradient(180deg,rgba(34,211,238,.09),rgba(34,211,238,.03));
+        border:1px solid rgba(34,211,238,.28);color:#b7e9f5;border-radius:var(--radius);
+        padding:13px 15px;font-size:.79rem;line-height:1.5;margin-bottom:16px;}
+  .note code{background:rgba(34,211,238,.14);color:#d9f6ff;padding:1px 6px;border-radius:5px;font-size:.76rem;}
+
+  /* tabs */
+  .tabs{display:flex;gap:6px;background:var(--surface);border:1px solid var(--border);padding:6px;
+        border-radius:var(--radius);margin-bottom:16px;box-shadow:var(--shadow);}
+  .tab{flex:1;border:0;background:transparent;color:var(--muted);padding:11px 12px;border-radius:9px;
+       font-size:.86rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s;}
+  .tab:hover{color:var(--text);}
+  .tab.active{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;
+              box-shadow:0 10px 22px -14px rgba(99,102,241,.95);}
+  .count{background:rgba(255,255,255,.16);color:inherit;border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:700;}
+  .tab:not(.active) .count{background:var(--surface-2);color:var(--muted);}
+
+  .pane-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap;}
+  .filters{display:flex;gap:6px;}
+  .chip{background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:7px 13px;
+        border-radius:999px;font-size:.78rem;font-weight:600;cursor:pointer;transition:.15s;}
+  .chip:hover{color:var(--text);}
+  .chip.active{background:rgba(99,102,241,.18);border-color:var(--primary);color:#c7c9ff;}
+
+  /* lists */
+  .list{display:flex;flex-direction:column;gap:9px;}
+  .item{display:flex;align-items:center;gap:13px;padding:12px 13px;background:linear-gradient(180deg,var(--surface),var(--bg-2));
+        border:1px solid var(--border);border-radius:var(--radius-sm);transition:.15s;}
+  .item:hover{border-color:var(--border-2);}
+  .thumb{width:44px;height:44px;flex-shrink:0;border-radius:11px;display:flex;align-items:center;justify-content:center;
+         background:linear-gradient(135deg,rgba(99,102,241,.25),rgba(139,92,246,.2));color:#c9cbff;}
+  .thumb svg{width:20px;height:20px;fill:currentColor;}
+  .thumb.played{background:linear-gradient(135deg,rgba(34,197,94,.28),rgba(34,197,94,.12));color:#86efac;}
+  .thumb.downloaded{background:linear-gradient(135deg,rgba(59,130,246,.28),rgba(34,211,238,.16));color:#93c5fd;}
+  .meta{min-width:0;flex:1;}
+  .name{font-size:.88rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .sub2{font-size:.74rem;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+  .dot{width:3px;height:3px;border-radius:50%;background:var(--muted-2);}
+  .actions{display:flex;gap:7px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}
+  .act{border:1px solid var(--border);background:var(--surface-2);color:var(--text);padding:8px 13px;border-radius:9px;
+       font-size:.78rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:.15s;}
+  .act svg{width:14px;height:14px;fill:currentColor;}
+  .act:hover{border-color:var(--border-2);background:#22304f;}
+  .act.play{background:rgba(34,197,94,.16);border-color:rgba(34,197,94,.45);color:#86efac;}
+  .act.play:hover{background:rgba(34,197,94,.26);}
+  .act.dl{background:linear-gradient(135deg,var(--primary),var(--primary-2));border-color:transparent;color:#fff;}
+  .act.dl:hover{filter:brightness(1.08);}
+  .act.icon{padding:8px 10px;}
+  .empty{color:var(--muted-2);font-size:.83rem;padding:26px 12px;text-align:center;border:1px dashed var(--border);
+         border-radius:var(--radius-sm);}
+
+  /* player */
+  #player{position:fixed;inset:0;background:rgba(4,8,16,.86);backdrop-filter:blur(6px);display:flex;
+          align-items:center;justify-content:center;padding:16px;z-index:60;}
+  .pbox{background:#080d18;border:1px solid var(--border);border-radius:16px;width:min(1080px,100%);
+        overflow:hidden;box-shadow:0 30px 80px -20px rgba(0,0,0,.85);display:flex;flex-direction:column;
+        transition:max-width .2s ease;}
+  .pbox.wide{width:min(1500px,100%);}
+  .phead{display:flex;align-items:center;gap:12px;padding:12px 15px;border-bottom:1px solid var(--border);
+         background:linear-gradient(180deg,#0d1526,#0a1120);}
+  .ptitle{flex:1;min-width:0;display:flex;align-items:center;gap:10px;}
+  .ptitle .t{font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tag{font-size:.68rem;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:#c9cbff;
+       border:1px solid rgba(99,102,241,.5);background:rgba(99,102,241,.15);border-radius:999px;padding:3px 10px;flex-shrink:0;}
+  .tag.preview{color:#fde68a;border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.14);}
+  .phead-actions{display:flex;gap:8px;flex-shrink:0;}
+  .stage{position:relative;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  .stage video{width:100%;display:block;background:#000;max-height:76vh;transition:transform .2s ease;}
+  .spinner{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+  .spinner::after{content:"";width:46px;height:46px;border-radius:50%;border:3px solid rgba(255,255,255,.22);
+        border-top-color:var(--accent);animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .centerplay{position:absolute;width:74px;height:74px;border-radius:50%;border:0;cursor:pointer;
+        background:rgba(12,18,32,.72);color:#fff;display:flex;align-items:center;justify-content:center;
+        backdrop-filter:blur(4px);box-shadow:0 12px 30px -10px rgba(0,0,0,.9);transition:.18s;}
+  .centerplay svg{width:30px;height:30px;fill:currentColor;margin-left:3px;}
+  .centerplay:hover{background:rgba(99,102,241,.9);transform:scale(1.06);}
+  .centerplay.hidden{display:none;}
+  .toast{position:absolute;top:16px;left:50%;transform:translate(-50%,-14px);background:rgba(10,16,28,.92);
+         border:1px solid var(--border-2);color:#e9eefb;padding:9px 16px;border-radius:999px;font-size:.8rem;
+         font-weight:600;opacity:0;pointer-events:none;transition:.2s;z-index:5;}
+  .toast.show{opacity:1;transform:translate(-50%,0);}
+  .controls{position:absolute;left:0;right:0;bottom:0;padding:10px 14px 13px;display:flex;flex-direction:column;gap:8px;
+        background:linear-gradient(180deg,rgba(6,10,20,0),rgba(6,10,20,.94) 42%);transition:opacity .2s,transform .2s;}
+  .controls.hide{opacity:0;transform:translateY(8px);pointer-events:none;}
+  .progress{position:relative;height:16px;display:flex;align-items:center;cursor:pointer;}
+  .progress .track{position:absolute;left:0;right:0;height:5px;border-radius:3px;background:rgba(255,255,255,.18);overflow:hidden;}
+  .progress .buffered{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.3);width:0;}
+  .progress .played{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--primary),var(--accent));width:0;}
+  .progress .knob{position:absolute;width:13px;height:13px;border-radius:50%;background:#fff;left:0;transform:translateX(-50%);
+        box-shadow:0 0 0 4px rgba(99,102,241,.35);pointer-events:none;}
+  .progress .tip{position:absolute;bottom:20px;transform:translateX(-50%);background:rgba(10,16,28,.95);
+        border:1px solid var(--border-2);color:#fff;font-size:.72rem;padding:3px 8px;border-radius:6px;
+        opacity:0;transition:.12s;pointer-events:none;white-space:nowrap;}
+  .progress:hover .tip{opacity:1;}
+  .ctrl-row{display:flex;align-items:center;gap:6px;color:#dbe7f2;flex-wrap:wrap;}
+  .cbtn{background:transparent;border:0;color:#dbe7f2;width:38px;height:38px;border-radius:9px;cursor:pointer;
+        display:flex;align-items:center;justify-content:center;transition:.14s;position:relative;}
+  .cbtn svg{width:19px;height:19px;fill:currentColor;}
+  .cbtn:hover{background:rgba(255,255,255,.1);color:#fff;}
+  .cbtn.on{color:var(--accent);}
+  .cbtn.on::after{content:"";position:absolute;bottom:4px;width:4px;height:4px;border-radius:50%;background:var(--accent);}
+  .cbtn.big{width:44px;height:44px;background:rgba(255,255,255,.08);}
+  .cbtn.big svg{width:22px;height:22px;}
+  .time{font-size:.78rem;font-variant-numeric:tabular-nums;color:#b9cbe2;min-width:98px;margin-left:4px;}
+  .spacer{flex:1;}
+  .vol-wrap{display:flex;align-items:center;gap:4px;}
+  input[type=range].vol{width:78px;-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;
+        background:rgba(255,255,255,.25);cursor:pointer;outline:none;}
+  input[type=range].vol::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;cursor:pointer;}
+  input[type=range].vol::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#fff;cursor:pointer;}
+  .select{background:#16233a;color:#dbe7f2;border:1px solid var(--border-2);border-radius:9px;padding:8px 9px;
+          font-size:.76rem;cursor:pointer;outline:none;}
+  .pmsg{color:var(--muted);font-size:.78rem;padding:10px 15px;min-height:1.2em;border-top:1px solid var(--border);
+        background:#0a1120;}
+  .pmsg.error{color:#fca5a5;}
+
+  /* shortcuts modal */
+  .modal{position:fixed;inset:0;background:rgba(4,8,16,.82);backdrop-filter:blur(5px);display:flex;
+         align-items:center;justify-content:center;padding:20px;z-index:70;}
+  .modal .panel{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);
+        border-radius:16px;width:min(560px,100%);padding:22px;box-shadow:0 30px 80px -20px rgba(0,0,0,.85);}
+  .modal h3{margin:0 0 16px;font-size:1.05rem;}
+  .keys{display:grid;grid-template-columns:1fr 1fr;gap:9px 20px;}
+  .krow{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.82rem;color:var(--muted);}
+  .kbd{background:var(--surface-2);border:1px solid var(--border-2);border-bottom-width:2px;border-radius:6px;
+       padding:2px 8px;font-size:.72rem;font-weight:700;color:var(--text);font-family:ui-monospace,Menlo,monospace;}
+  .hidden{display:none !important;}
+
+  @media (max-width:620px){
+    .keys{grid-template-columns:1fr;}
+    .item{flex-wrap:wrap;}
+    .actions{width:100%;justify-content:flex-start;}
+    .time{min-width:auto;}
+    .brand h1{font-size:1.06rem;}
+  }
 </style>
 </head>
 <body>
 <div class="app">
-  <h1>TeraBox Downloader</h1>
-  <div class="sub">Paste a public TeraBox share link to list, play, and download its files.</div>
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">TB</div>
+      <div>
+        <h1>TeraBox Downloader</h1>
+        <div class="sub">Play and download public TeraBox shares</div>
+      </div>
+    </div>
+    <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts">?</button>
+  </div>
 
-  <div id="note" class="note">
-    No account needed. TeraBox refuses anonymous direct downloads, so the app
-    streams the full video through a helper service. That service sees the links
-    you paste, and its copy is a transcoded stream (downloaded as <code>.ts</code>),
-    not TeraBox's original file. Set <code>TERABOX_COOKIE</code> (see the README)
-    to download the original MP4 instead, or <code>TERABOX_FALLBACK=off</code>
-    to disable the helper.
+  <div class="note">
+    No account needed. TeraBox refuses anonymous direct downloads, so the app streams the full
+    video through a helper service. That service sees the links you paste, and its copy is a
+    transcoded stream (downloaded as <code>.ts</code>), not TeraBox's original file. Set
+    <code>TERABOX_COOKIE</code> (see the README) to download the original MP4 instead, or
+    <code>TERABOX_FALLBACK=off</code> to disable the helper.
   </div>
 
   <div class="card">
     <label for="link">TeraBox share link</label>
-    <input id="link" type="text" placeholder="https://www.terabox.com/s/xxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+    <div class="input-wrap">
+      <input id="link" type="text" placeholder="https://www.terabox.com/s/xxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+      <button id="paste" class="btn ghost sm">Paste</button>
+    </div>
     <div class="row">
-      <button id="fetch" class="primary">Fetch files</button>
-      <button id="clear" class="ghost">Clear</button>
+      <button id="fetch" class="btn primary">Fetch files</button>
+      <button id="clear" class="btn ghost">Clear</button>
     </div>
-    <div id="status"></div>
+    <div id="status" class="status"></div>
   </div>
 
-  <div id="filesCard" class="card hidden">
-    <label id="filesTitle">Files</label>
-    <div id="files" class="files"></div>
-  </div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="files">Files <span class="count" id="filesCount">0</span></button>
+    <button class="tab" data-tab="history">History <span class="count" id="histCount">0</span></button>
+  </nav>
 
-  <div class="card">
-    <div class="card-head">
-      <label>History</label>
-      <button id="histClear" class="link-btn hidden">Clear history</button>
+  <section id="tab-files">
+    <div id="files" class="list"></div>
+    <div id="filesEmpty" class="empty">No files yet. Paste a share link above and press Fetch files.</div>
+  </section>
+
+  <section id="tab-history" class="hidden">
+    <div class="pane-head">
+      <div class="filters">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="played">Played</button>
+        <button class="chip" data-filter="downloaded">Downloaded</button>
+      </div>
+      <button id="histClear" class="btn ghost sm hidden">Clear history</button>
     </div>
-    <div id="history"></div>
-  </div>
+    <div id="history" class="list"></div>
+    <div id="histEmpty" class="empty">Videos you play or download will show up here.</div>
+  </section>
 </div>
 
 <div id="player" class="hidden">
-  <div class="box">
-    <div class="head">
-      <span class="t" id="playerTitle">Video</span>
-      <span class="tag hidden" id="playerTag"></span>
-      <button class="icon-btn" id="playerClose" title="Close (Esc)">&#10005;</button>
+  <div class="pbox" id="pbox">
+    <div class="phead">
+      <div class="ptitle">
+        <span class="t" id="playerTitle">Video</span>
+        <span class="tag hidden" id="playerTag"></span>
+      </div>
+      <div class="phead-actions">
+        <button class="btn ghost sm" id="btnDownloadTop">
+          <svg viewBox="0 0 24 24"><path d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4l-4.7-4.7 1.4-1.4L12 13.6V3zM5 19h14v2H5z"/></svg>
+          Download
+        </button>
+        <button class="icon-btn" id="playerClose" title="Close (Esc)">&#10005;</button>
+      </div>
     </div>
-    <div class="stage">
+    <div class="stage" id="stage">
       <video id="playerVideo" playsinline></video>
       <div class="spinner" id="playerSpinner"></div>
-    </div>
-    <div class="controls">
-      <input class="seek" id="seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="Seek">
-      <div class="ctrl-row">
-        <button id="btnPlay" title="Play/Pause (Space)">&#9654;</button>
-        <button id="btnBack" title="Back 10s (&#8592;)">&#9198;</button>
-        <button id="btnFwd" title="Forward 10s (&#8594;)">&#9197;</button>
-        <span class="time" id="time">0:00 / 0:00</span>
-        <span class="spacer"></span>
-        <input class="vol" id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
-        <button id="btnMute" title="Mute (M)">&#128266;</button>
-        <select id="rate" title="Playback speed">
-          <option value="0.5">0.5&times;</option>
-          <option value="0.75">0.75&times;</option>
-          <option value="1" selected>1&times;</option>
-          <option value="1.25">1.25&times;</option>
-          <option value="1.5">1.5&times;</option>
-          <option value="2">2&times;</option>
-        </select>
-        <button id="btnFs" title="Fullscreen (F)">&#9974;</button>
+      <button class="centerplay hidden" id="centerPlay" aria-label="Play">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <div class="toast" id="toast"></div>
+      <div class="controls" id="controls">
+        <div class="progress" id="progress">
+          <div class="track">
+            <div class="buffered" id="buffered"></div>
+            <div class="played" id="played"></div>
+          </div>
+          <div class="knob" id="knob"></div>
+          <div class="tip" id="tip">0:00</div>
+        </div>
+        <div class="ctrl-row">
+          <button class="cbtn big" id="btnPlay" title="Play / Pause (Space)">
+            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button class="cbtn" id="btnBack" title="Back 10s (&#8592;)">
+            <svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>
+          </button>
+          <button class="cbtn" id="btnFwd" title="Forward 10s (&#8594;)">
+            <svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7a6 6 0 1 0 6 6h2a8 8 0 1 1-8-8z"/></svg>
+          </button>
+          <span class="time" id="time">0:00 / 0:00</span>
+          <span class="spacer"></span>
+          <div class="vol-wrap">
+            <button class="cbtn" id="btnMute" title="Mute (M)">
+              <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+            </button>
+            <input class="vol" id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+          </div>
+          <select class="select" id="rate" title="Playback speed">
+            <option value="0.5">0.5&times;</option>
+            <option value="0.75">0.75&times;</option>
+            <option value="1" selected>1&times;</option>
+            <option value="1.25">1.25&times;</option>
+            <option value="1.5">1.5&times;</option>
+            <option value="2">2&times;</option>
+          </select>
+          <button class="cbtn" id="btnLoop" title="Loop (L)">
+            <svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+          </button>
+          <button class="cbtn" id="btnPip" title="Picture in picture (P)">
+            <svg viewBox="0 0 24 24"><path d="M3 5h18v14H3V5zm2 2v10h14V7H5zm7 4h5v4h-5v-4z"/></svg>
+          </button>
+          <button class="cbtn" id="btnRotate" title="Rotate 90&deg; (R)">
+            <svg viewBox="0 0 24 24"><path d="M12 5V2L8 6l4 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+          </button>
+          <button class="cbtn" id="btnShot" title="Snapshot (S)">
+            <svg viewBox="0 0 24 24"><path d="M9 3h6l1.5 2H21v14H3V5h4.5L9 3zm3 5a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></svg>
+          </button>
+          <button class="cbtn" id="btnWide" title="Theater mode (W)">
+            <svg viewBox="0 0 24 24"><path d="M3 5h18v14H3V5zm2 2v10h14V7H5z"/></svg>
+          </button>
+          <button class="cbtn" id="btnFs" title="Fullscreen (F)">
+            <svg viewBox="0 0 24 24"><path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/></svg>
+          </button>
+        </div>
       </div>
-      <div class="pmsg" id="playerMsg"></div>
+    </div>
+    <div class="pmsg" id="playerMsg"></div>
+  </div>
+</div>
+
+<div id="shortcuts" class="modal hidden">
+  <div class="panel">
+    <h3>Keyboard shortcuts</h3>
+    <div class="keys">
+      <div class="krow"><span>Play / Pause</span><span class="kbd">Space</span></div>
+      <div class="krow"><span>Seek back 10s</span><span class="kbd">&#8592;</span></div>
+      <div class="krow"><span>Seek forward 10s</span><span class="kbd">&#8594;</span></div>
+      <div class="krow"><span>Volume up / down</span><span class="kbd">&#8593; &#8595;</span></div>
+      <div class="krow"><span>Mute</span><span class="kbd">M</span></div>
+      <div class="krow"><span>Fullscreen</span><span class="kbd">F</span></div>
+      <div class="krow"><span>Picture in picture</span><span class="kbd">P</span></div>
+      <div class="krow"><span>Rotate video</span><span class="kbd">R</span></div>
+      <div class="krow"><span>Snapshot</span><span class="kbd">S</span></div>
+      <div class="krow"><span>Loop</span><span class="kbd">L</span></div>
+      <div class="krow"><span>Theater mode</span><span class="kbd">W</span></div>
+      <div class="krow"><span>Jump to 0-90%</span><span class="kbd">0 - 9</span></div>
+      <div class="krow"><span>Close player</span><span class="kbd">Esc</span></div>
+      <div class="krow"><span>Show this panel</span><span class="kbd">?</span></div>
     </div>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 <script>
-const linkEl = document.getElementById('link');
-const fetchBtn = document.getElementById('fetch');
-const clearBtn = document.getElementById('clear');
-const statusEl = document.getElementById('status');
-const filesCard = document.getElementById('filesCard');
-const filesEl = document.getElementById('files');
-const filesTitle = document.getElementById('filesTitle');
-const player = document.getElementById('player');
-const playerVideo = document.getElementById('playerVideo');
-const playerTitle = document.getElementById('playerTitle');
-const playerMsg = document.getElementById('playerMsg');
-const playerTag = document.getElementById('playerTag');
-const playerSpinner = document.getElementById('playerSpinner');
-const seekEl = document.getElementById('seek');
-const timeEl = document.getElementById('time');
-const volEl = document.getElementById('vol');
-const rateEl = document.getElementById('rate');
-const historyEl = document.getElementById('history');
-const histClearBtn = document.getElementById('histClear');
+const ICON_PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
+const ICON_VOL = '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>';
+const ICON_MUTE = '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm15.5-1.5-1.4-1.4L15.7 8.5l-2.4-2.4-1.4 1.4 2.4 2.4-2.4 2.4 1.4 1.4 2.4-2.4 2.4 2.4 1.4-1.4-2.4-2.4z"/></svg>';
 
-function setStatus(msg, isError) {
-  statusEl.textContent = msg || '';
-  statusEl.className = isError ? 'error' : '';
-}
+const $ = id => document.getElementById(id);
+const linkEl = $('link'), fetchBtn = $('fetch'), clearBtn = $('clear'), pasteBtn = $('paste');
+const statusEl = $('status'), filesEl = $('files'), filesEmpty = $('filesEmpty');
+const filesCount = $('filesCount'), histCount = $('histCount');
+const player = $('player'), pbox = $('pbox'), stage = $('stage');
+const playerVideo = $('playerVideo'), playerTitle = $('playerTitle'), playerMsg = $('playerMsg');
+const playerTag = $('playerTag'), playerSpinner = $('playerSpinner'), controls = $('controls');
+const centerPlay = $('centerPlay'), toastEl = $('toast');
+const progressEl = $('progress'), bufferedEl = $('buffered'), playedEl = $('played'), knobEl = $('knob'), tipEl = $('tip');
+const timeEl = $('time'), volEl = $('vol'), rateEl = $('rate');
+const historyEl = $('history'), histEmpty = $('histEmpty'), histClearBtn = $('histClear');
 
-function fmtTime(sec) {
+function setStatus(msg, isError){ statusEl.textContent = msg || ''; statusEl.className = 'status' + (isError ? ' error' : ''); }
+function toast(msg){ toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastEl._t); toastEl._t = setTimeout(() => toastEl.classList.remove('show'), 1300); }
+function fmtTime(sec){
   if (!isFinite(sec) || sec < 0) sec = 0;
   const s = Math.floor(sec % 60), m = Math.floor(sec / 60) % 60, h = Math.floor(sec / 3600);
   const mm = h ? String(m).padStart(2, '0') : String(m);
   return (h ? h + ':' : '') + mm + ':' + String(s).padStart(2, '0');
 }
+function esc(s){ const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+// --- Tabs ------------------------------------------------------------------
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  $('tab-files').classList.toggle('hidden', name !== 'files');
+  $('tab-history').classList.toggle('hidden', name !== 'history');
+}
 
 // --- History (localStorage) ------------------------------------------------
+const HIST_KEY = 'terabox.history.v2';
+const HIST_MAX = 40;
+let histFilter = 'all';
 
-const HIST_KEY = 'terabox.history.v1';
-const HIST_MAX = 30;
-
-function loadHistory() {
-  try { return JSON.parse(localStorage.getItem(HIST_KEY)) || []; }
-  catch (e) { return []; }
-}
-
-function saveHistory(items) {
-  try { localStorage.setItem(HIST_KEY, JSON.stringify(items.slice(0, HIST_MAX))); }
-  catch (e) { /* storage full or blocked; history is best-effort */ }
-}
-
-function addHistory(entry) {
+function loadHistory(){ try { return JSON.parse(localStorage.getItem(HIST_KEY)) || []; } catch (e) { return []; } }
+function saveHistory(items){ try { localStorage.setItem(HIST_KEY, JSON.stringify(items.slice(0, HIST_MAX))); } catch (e) {} }
+function addHistory(entry){
   const items = loadHistory();
   const key = entry.kind + '|' + entry.name + '|' + (entry.link || '');
   const rest = items.filter(it => (it.kind + '|' + it.name + '|' + (it.link || '')) !== key);
@@ -1072,51 +1256,62 @@ function addHistory(entry) {
   saveHistory(rest);
   renderHistory();
 }
+function removeHistory(at){
+  saveHistory(loadHistory().filter(it => it.at !== at));
+  renderHistory();
+}
+document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+  histFilter = c.dataset.filter;
+  document.querySelectorAll('.chip').forEach(x => x.classList.toggle('active', x === c));
+  renderHistory();
+}));
 
-function renderHistory() {
-  const items = loadHistory();
+function renderHistory(){
+  const all = loadHistory();
+  const items = histFilter === 'all' ? all : all.filter(it => it.kind === histFilter);
   historyEl.innerHTML = '';
-  histClearBtn.classList.toggle('hidden', items.length === 0);
-  if (!items.length) {
-    const p = document.createElement('div');
-    p.className = 'empty';
-    p.textContent = 'Videos you play or download will show up here.';
-    historyEl.append(p);
-    return;
-  }
+  histCount.textContent = all.length;
+  histClearBtn.classList.toggle('hidden', all.length === 0);
+  histEmpty.classList.toggle('hidden', items.length > 0);
   for (const it of items) {
     const row = document.createElement('div');
-    row.className = 'hist-item';
+    row.className = 'item';
+    const f = { id: it.id, name: it.name, is_video: true };
 
     const badge = document.createElement('div');
-    badge.className = 'hist-badge ' + it.kind;
-    badge.textContent = it.kind === 'played' ? '\u25B6' : '\u2193';
+    badge.className = 'thumb ' + it.kind;
+    badge.innerHTML = it.kind === 'played'
+      ? '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'
+      : '<svg viewBox="0 0 24 24"><path d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4l-4.7-4.7 1.4-1.4L12 13.6V3zM5 19h14v2H5z"/></svg>';
 
     const meta = document.createElement('div');
-    meta.className = 'hist-meta';
-    const name = document.createElement('div');
-    name.className = 'hist-name';
-    name.textContent = it.name;
-    const sub = document.createElement('div');
-    sub.className = 'hist-sub';
-    const when = new Date(it.at).toLocaleString();
-    sub.textContent = (it.kind === 'played' ? 'Played' : 'Downloaded') + ' \u00B7 ' + when;
-    meta.append(name, sub);
+    meta.className = 'meta';
+    meta.innerHTML = '<div class="name">' + esc(it.name) + '</div>' +
+      '<div class="sub2">' + (it.kind === 'played' ? 'Played' : 'Downloaded') +
+      '<span class="dot"></span>' + esc(new Date(it.at).toLocaleString()) + '</div>';
 
     const actions = document.createElement('div');
-    actions.className = 'hist-actions';
-    const f = { id: it.id, name: it.name, is_video: true };
+    actions.className = 'actions';
     if (it.is_video) {
       const play = document.createElement('button');
-      play.className = 'play';
-      play.textContent = 'Play';
+      play.className = 'act play'; play.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Play';
       play.addEventListener('click', () => openPlayer(f, it.link));
       actions.append(play);
     }
     const dl = document.createElement('button');
-    dl.textContent = 'Download';
+    dl.className = 'act dl'; dl.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4l-4.7-4.7 1.4-1.4L12 13.6V3zM5 19h14v2H5z"/></svg>Download';
     dl.addEventListener('click', () => startDownload(f, dl, it.link));
     actions.append(dl);
+    const copy = document.createElement('button');
+    copy.className = 'act icon'; copy.title = 'Copy share link';
+    copy.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 3h9v2H9V3zm-2 4h13v14H7V7zm2 2v10h9V9H9z"/></svg>';
+    copy.addEventListener('click', () => copyText(it.link || linkEl.value.trim(), 'Link copied'));
+    actions.append(copy);
+    const del = document.createElement('button');
+    del.className = 'act icon'; del.title = 'Remove from history';
+    del.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 7h12v13H6V7zm3-4h6l1 2h4v2H4V5h4l1-2z"/></svg>';
+    del.addEventListener('click', () => removeHistory(it.at));
+    actions.append(del);
 
     row.append(badge, meta, actions);
     historyEl.append(row);
@@ -1124,61 +1319,68 @@ function renderHistory() {
 }
 
 // --- File list -------------------------------------------------------------
-
-function renderFiles(share) {
+function renderFiles(share){
   filesEl.innerHTML = '';
-  filesTitle.textContent = share.files.length === 1
-    ? 'File' : `Files (${share.files.length})`;
+  filesCount.textContent = share.files.length;
+  filesEmpty.classList.toggle('hidden', share.files.length > 0);
   for (const f of share.files) {
     const row = document.createElement('div');
-    row.className = 'file';
+    row.className = 'item';
+    const badge = document.createElement('div');
+    badge.className = 'thumb';
+    badge.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm6 3v10l7-5-7-5z"/></svg>';
+
     const meta = document.createElement('div');
     meta.className = 'meta';
-    const name = document.createElement('div');
-    name.className = 'name';
-    name.textContent = f.name;
-    const size = document.createElement('div');
-    size.className = 'size';
-    size.textContent = f.size_text || '';
-    meta.append(name, size);
+    meta.innerHTML = '<div class="name">' + esc(f.name) + '</div>' +
+      '<div class="sub2">' + esc(f.size_text || '') + (f.is_video ? '<span class="dot"></span>Video' : '') + '</div>';
 
     const actions = document.createElement('div');
     actions.className = 'actions';
     if (f.is_video) {
       const play = document.createElement('button');
-      play.className = 'play';
-      play.textContent = 'Play';
+      play.className = 'act play'; play.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Play';
       play.addEventListener('click', () => openPlayer(f));
       actions.append(play);
     }
     const dl = document.createElement('button');
-    dl.textContent = 'Download';
+    dl.className = 'act dl'; dl.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4l-4.7-4.7 1.4-1.4L12 13.6V3zM5 19h14v2H5z"/></svg>Download';
     dl.addEventListener('click', () => startDownload(f, dl));
     actions.append(dl);
+    const copy = document.createElement('button');
+    copy.className = 'act icon'; copy.title = 'Copy file link';
+    copy.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 3h9v2H9V3zm-2 4h13v14H7V7zm2 2v10h9V9H9z"/></svg>';
+    copy.addEventListener('click', () => copyText(mediaUrl(f, '/api/download'), 'Download link copied'));
+    actions.append(copy);
 
-    row.append(meta, actions);
+    row.append(badge, meta, actions);
     filesEl.append(row);
   }
-  filesCard.classList.remove('hidden');
 }
 
-function mediaUrl(f, endpoint, link) {
+function mediaUrl(f, endpoint, link){
   return endpoint + '?link=' + encodeURIComponent(link || linkEl.value.trim()) +
          '&fs_id=' + encodeURIComponent(f.id) +
          '&name=' + encodeURIComponent(f.name || '') + '&t=' + Date.now();
 }
-
-function dispositionName(header) {
+function dispositionName(header){
   if (!header) return '';
   const star = /filename[*]=UTF-8''([^;]+)/i.exec(header);
   if (star) { try { return decodeURIComponent(star[1]); } catch (e) { return star[1]; } }
   const plain = /filename="?([^";]+)"?/i.exec(header);
   return plain ? plain[1] : '';
 }
+function copyText(text, msg){
+  if (!text) { toast('Nothing to copy'); return; }
+  const done = () => toast(msg || 'Copied');
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, done);
+  else { const t = document.createElement('textarea'); t.value = text; document.body.append(t); t.select();
+         try { document.execCommand('copy'); } catch (e) {} t.remove(); done(); }
+}
 
-async function startDownload(f, button, link) {
+async function startDownload(f, button, link){
   // Preflight a 2-byte ranged GET: a real download answers with bytes, whereas
-  // a refusal answers JSON — so the user sees a message instead of a JSON page.
+  // a refusal answers JSON - so the user sees a message instead of a JSON page.
   button.disabled = true;
   const url = mediaUrl(f, '/api/download', link);
   setStatus('Preparing download\u2026');
@@ -1187,9 +1389,8 @@ async function startDownload(f, button, link) {
     const type = probe.headers.get('Content-Type') || '';
     if (probe.ok && !type.includes('application/json')) {
       const name = dispositionName(probe.headers.get('Content-Disposition')) || f.name;
-      addHistory({ kind: 'downloaded', name: name, id: f.id, link: link || linkEl.value.trim(),
-                   is_video: !!f.is_video });
-      window.location.href = url;  // Content-Disposition: attachment keeps the page
+      addHistory({ kind: 'downloaded', name: name, id: f.id, link: link || linkEl.value.trim(), is_video: !!f.is_video });
+      window.location.href = url;
       setStatus('Download started: ' + name);
     } else {
       let msg = 'Download failed.';
@@ -1204,164 +1405,251 @@ async function startDownload(f, button, link) {
 }
 
 // --- Player ----------------------------------------------------------------
-
 let hls = null;
 let playAttempt = 0;
+let rotation = 0;
+let hideTimer = null;
+let currentFile = null;
+let currentLink = '';
 
-function tearDownPlayer() {
+function tearDownPlayer(){
   playAttempt++;
   if (hls) { hls.destroy(); hls = null; }
   playerVideo.pause();
   playerVideo.removeAttribute('src');
   playerVideo.load();
-  seekEl.value = 0; seekEl.max = 0;
+  rotation = 0;
+  playerVideo.style.transform = 'none';
+  playedEl.style.width = '0%'; bufferedEl.style.width = '0%'; knobEl.style.left = '0%';
   timeEl.textContent = '0:00 / 0:00';
   playerTag.classList.add('hidden');
+  playerTag.classList.remove('preview');
   playerSpinner.style.display = 'none';
+  centerPlay.classList.add('hidden');
+  controls.classList.remove('hide');
+}
+function showSpinner(on){ playerSpinner.style.display = on ? 'flex' : 'none'; }
+function setPlayingIcon(){
+  const paused = playerVideo.paused;
+  $('btnPlay').innerHTML = paused ? ICON_PLAY : ICON_PAUSE;
+  centerPlay.classList.toggle('hidden', !paused || playerVideo.readyState === 0);
+}
+function showControls(){
+  controls.classList.remove('hide');
+  clearTimeout(hideTimer);
+  if (!playerVideo.paused) hideTimer = setTimeout(() => controls.classList.add('hide'), 3000);
+}
+function applyRotation(){
+  const deg = ((rotation % 360) + 360) % 360;
+  const w = playerVideo.offsetWidth, h = playerVideo.offsetHeight;
+  if ((deg === 90 || deg === 270) && w && h) {
+    const s = Math.min(stage.clientWidth / h, stage.clientHeight / w);
+    playerVideo.style.transform = 'rotate(' + deg + 'deg) scale(' + s + ')';
+  } else {
+    playerVideo.style.transform = deg ? 'rotate(' + deg + 'deg)' : 'none';
+  }
 }
 
-function showSpinner(on) { playerSpinner.style.display = on ? 'flex' : 'none'; }
-
-function setPlayingIcon() {
-  document.getElementById('btnPlay').innerHTML = playerVideo.paused ? '&#9654;' : '&#10074;&#10074;';
-}
-
-async function openPlayer(f, link) {
+async function openPlayer(f, link){
   const useLink = link || linkEl.value.trim();
+  currentFile = f; currentLink = useLink;
   tearDownPlayer();
   const attempt = ++playAttempt;
   playerTitle.textContent = f.name;
   playerMsg.textContent = 'Preparing stream\u2026';
+  playerMsg.classList.remove('error');
   playerTag.textContent = 'Full length';
   playerTag.classList.remove('hidden');
   showSpinner(true);
   player.classList.remove('hidden');
   setPlayingIcon();
+  showControls();
   addHistory({ kind: 'played', name: f.name, id: f.id, link: useLink, is_video: true });
 
-  // Resolve the playlist first (behind the spinner); the helpers take several
-  // seconds to answer, and starting the video only afterwards keeps it from
-  // giving up while the stream is still being arranged.
   let prep = null;
-  try {
-    const resp = await fetch(mediaUrl(f, '/api/prepare', useLink));
-    prep = await resp.json();
-  } catch (err) { /* fall through to playback attempt */ }
+  try { const resp = await fetch(mediaUrl(f, '/api/prepare', useLink)); prep = await resp.json(); }
+  catch (err) {}
   if (attempt !== playAttempt) return;
   if (prep && !prep.ok) { playPreview(f, attempt, useLink, prep.error); return; }
-
   playerMsg.textContent = '';
   playStream(f, attempt, useLink);
 }
 
-function playStream(f, attempt, link) {
+function playStream(f, attempt, link){
   const url = mediaUrl(f, '/api/hls', link);
   if (window.Hls && window.Hls.isSupported()) {
     if (hls) hls.destroy();
     hls = new window.Hls({ lowLatencyMode: false });
     hls.loadSource(url);
     hls.attachMedia(playerVideo);
-    hls.on(window.Hls.Events.MANIFEST_PARSED, () => { playerVideo.play().catch(() => {}); });
+    hls.on(window.Hls.Events.MANIFEST_PARSED, () => playerVideo.play().catch(() => {}));
     hls.on(window.Hls.Events.ERROR, (e, data) => {
-      if (attempt !== playAttempt) return;
-      if (data && data.fatal) {
-        showSpinner(false);
-        playerMsg.textContent = 'This video could not be played. Try Download instead.';
-      }
+      if (attempt !== playAttempt || !data || !data.fatal) return;
+      showSpinner(false);
+      playerMsg.classList.add('error');
+      playerMsg.textContent = 'This video could not be played. Try Download instead.';
     });
   } else {
     playerVideo.src = url;
     playerVideo.play().catch(() => {});
   }
 }
-
-function playPreview(f, attempt, link, reason) {
-  playerMsg.textContent = (reason ? reason + ' ' : '') +
-    'Showing TeraBox\u2019s 30-second preview.';
+function playPreview(f, attempt, link, reason){
+  playerMsg.textContent = (reason ? reason + ' ' : '') + 'Showing TeraBox\u2019s 30-second preview.';
   playerTag.textContent = 'Preview';
+  playerTag.classList.add('preview');
   playerTag.classList.remove('hidden');
   playStream(f, attempt, link);
 }
-
-function closePlayer() {
-  tearDownPlayer();
-  player.classList.add('hidden');
-  playerMsg.textContent = '';
-}
+function closePlayer(){ tearDownPlayer(); player.classList.add('hidden'); playerMsg.textContent = ''; }
 
 // video events -> UI
 playerVideo.addEventListener('loadeddata', () => { showSpinner(false); setPlayingIcon(); });
 playerVideo.addEventListener('waiting', () => showSpinner(true));
-playerVideo.addEventListener('playing', () => { showSpinner(false); setPlayingIcon(); });
-playerVideo.addEventListener('pause', setPlayingIcon);
+playerVideo.addEventListener('playing', () => { showSpinner(false); setPlayingIcon(); showControls(); });
+playerVideo.addEventListener('pause', () => { setPlayingIcon(); controls.classList.remove('hide'); });
 playerVideo.addEventListener('play', setPlayingIcon);
 playerVideo.addEventListener('ended', setPlayingIcon);
 playerVideo.addEventListener('timeupdate', () => {
-  if (!seekEl.dragging) seekEl.value = playerVideo.currentTime;
-  timeEl.textContent = fmtTime(playerVideo.currentTime) + ' / ' + fmtTime(playerVideo.duration);
+  const d = playerVideo.duration || 0;
+  const pct = d ? (playerVideo.currentTime / d) * 100 : 0;
+  playedEl.style.width = pct + '%';
+  knobEl.style.left = pct + '%';
+  if (playerVideo.buffered.length && d) {
+    bufferedEl.style.width = (playerVideo.buffered.end(playerVideo.buffered.length - 1) / d * 100) + '%';
+  }
+  timeEl.textContent = fmtTime(playerVideo.currentTime) + ' / ' + fmtTime(d);
 });
 playerVideo.addEventListener('loadedmetadata', () => {
-  seekEl.max = playerVideo.duration || 0;
   timeEl.textContent = fmtTime(playerVideo.currentTime) + ' / ' + fmtTime(playerVideo.duration);
+  applyRotation();
 });
+
+// progress bar (custom, with hover tip)
+function seekFromEvent(e){
+  const d = playerVideo.duration || 0;
+  if (!d) return;
+  const rect = progressEl.getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  playerVideo.currentTime = ratio * d;
+}
+progressEl.addEventListener('click', seekFromEvent);
+progressEl.addEventListener('mousemove', e => {
+  const d = playerVideo.duration || 0;
+  const rect = progressEl.getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  tipEl.style.left = (ratio * 100) + '%';
+  tipEl.textContent = fmtTime(ratio * d);
+});
+let dragging = false;
+progressEl.addEventListener('mousedown', e => { dragging = true; seekFromEvent(e); });
+window.addEventListener('mousemove', e => { if (dragging) seekFromEvent(e); });
+window.addEventListener('mouseup', () => { dragging = false; });
 
 // controls
-seekEl.addEventListener('input', () => { seekEl.dragging = true; });
-seekEl.addEventListener('change', () => {
-  playerVideo.currentTime = Number(seekEl.value);
-  seekEl.dragging = false;
-});
-document.getElementById('btnPlay').addEventListener('click', () => {
-  if (playerVideo.paused) playerVideo.play().catch(() => {}); else playerVideo.pause();
-});
-document.getElementById('btnBack').addEventListener('click', () => {
-  playerVideo.currentTime = Math.max(0, playerVideo.currentTime - 10);
-});
-document.getElementById('btnFwd').addEventListener('click', () => {
-  playerVideo.currentTime = Math.min(playerVideo.duration || 0, playerVideo.currentTime + 10);
-});
+$('btnPlay').addEventListener('click', () => { if (playerVideo.paused) playerVideo.play().catch(() => {}); else playerVideo.pause(); });
+centerPlay.addEventListener('click', () => playerVideo.play().catch(() => {}));
+$('btnBack').addEventListener('click', () => { playerVideo.currentTime = Math.max(0, playerVideo.currentTime - 10); toast('-10s'); });
+$('btnFwd').addEventListener('click', () => { playerVideo.currentTime = Math.min(playerVideo.duration || 0, playerVideo.currentTime + 10); toast('+10s'); });
 volEl.addEventListener('input', () => { playerVideo.volume = Number(volEl.value); playerVideo.muted = false; syncMute(); });
-document.getElementById('btnMute').addEventListener('click', () => {
-  playerVideo.muted = !playerVideo.muted;
-  syncMute();
-});
-function syncMute() {
-  document.getElementById('btnMute').innerHTML = playerVideo.muted ? '&#128263;' : '&#128266;';
+$('btnMute').addEventListener('click', () => { playerVideo.muted = !playerVideo.muted; syncMute(); });
+function syncMute(){
+  $('btnMute').innerHTML = playerVideo.muted || playerVideo.volume === 0 ? ICON_MUTE : ICON_VOL;
+  $('btnMute').classList.toggle('on', playerVideo.muted || playerVideo.volume === 0);
 }
-rateEl.addEventListener('change', () => { playerVideo.playbackRate = Number(rateEl.value); });
-document.getElementById('btnFs').addEventListener('click', () => {
-  const box = player.querySelector('.box');
-  if (document.fullscreenElement) document.exitFullscreen();
-  else (box.requestFullscreen ? box.requestFullscreen() : playerVideo.webkitEnterFullscreen?.());
+rateEl.addEventListener('change', () => { playerVideo.playbackRate = Number(rateEl.value); toast('Speed ' + rateEl.value + '\u00d7'); });
+$('btnLoop').addEventListener('click', () => {
+  playerVideo.loop = !playerVideo.loop;
+  $('btnLoop').classList.toggle('on', playerVideo.loop);
+  toast(playerVideo.loop ? 'Loop on' : 'Loop off');
 });
-document.getElementById('playerClose').addEventListener('click', closePlayer);
+$('btnPip').addEventListener('click', async () => {
+  try {
+    if (document.pictureInPictureElement) await document.exitPictureInPicture();
+    else await playerVideo.requestPictureInPicture();
+  } catch (e) { toast('Picture in picture not available'); }
+});
+$('btnRotate').addEventListener('click', () => {
+  rotation = (rotation + 90) % 360;
+  applyRotation();
+  toast('Rotated ' + rotation + '\u00b0');
+});
+$('btnShot').addEventListener('click', () => {
+  try {
+    const c = document.createElement('canvas');
+    c.width = playerVideo.videoWidth; c.height = playerVideo.videoHeight;
+    c.getContext('2d').drawImage(playerVideo, 0, 0);
+    const a = document.createElement('a');
+    a.href = c.toDataURL('image/png');
+    a.download = (currentFile ? currentFile.name.replace(/[.][^.]+$/, '') : 'frame') + '-' + Math.floor(playerVideo.currentTime) + 's.png';
+    a.click();
+    toast('Snapshot saved');
+  } catch (e) { toast('Snapshot blocked by the stream'); }
+});
+$('btnWide').addEventListener('click', () => {
+  pbox.classList.toggle('wide');
+  $('btnWide').classList.toggle('on', pbox.classList.contains('wide'));
+  setTimeout(applyRotation, 220);
+});
+$('btnFs').addEventListener('click', toggleFullscreen);
+function toggleFullscreen(){
+  if (document.fullscreenElement) document.exitFullscreen();
+  else if (pbox.requestFullscreen) pbox.requestFullscreen().catch(() => {});
+  else if (playerVideo.webkitEnterFullscreen) playerVideo.webkitEnterFullscreen();
+}
+document.addEventListener('fullscreenchange', () => setTimeout(applyRotation, 120));
+window.addEventListener('resize', applyRotation);
+$('btnDownloadTop').addEventListener('click', () => { if (currentFile) startDownload(currentFile, $('btnDownloadTop'), currentLink); });
+$('playerClose').addEventListener('click', closePlayer);
 player.addEventListener('click', e => { if (e.target === player) closePlayer(); });
+stage.addEventListener('mousemove', showControls);
+stage.addEventListener('click', e => {
+  if (e.target === playerVideo || e.target === stage) {
+    if (playerVideo.paused) playerVideo.play().catch(() => {}); else playerVideo.pause();
+  }
+});
+stage.addEventListener('dblclick', e => { if (e.target === playerVideo || e.target === stage) toggleFullscreen(); });
+
+// shortcuts modal
+function toggleHelp(force){
+  const el = $('shortcuts');
+  const show = force !== undefined ? force : el.classList.contains('hidden');
+  el.classList.toggle('hidden', !show);
+}
+$('helpBtn').addEventListener('click', () => toggleHelp());
+$('shortcuts').addEventListener('click', e => { if (e.target === $('shortcuts')) toggleHelp(false); });
 
 document.addEventListener('keydown', e => {
+  const typing = e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA';
+  if (e.key === 'Escape') { if (!$('shortcuts').classList.contains('hidden')) { toggleHelp(false); return; } if (!player.classList.contains('hidden')) closePlayer(); return; }
   if (player.classList.contains('hidden')) return;
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.key === 'Escape') closePlayer();
-  else if (e.key === ' ' || e.key === 'k') { e.preventDefault();
-    if (playerVideo.paused) playerVideo.play().catch(() => {}); else playerVideo.pause(); }
-  else if (e.key === 'ArrowLeft') playerVideo.currentTime = Math.max(0, playerVideo.currentTime - 10);
-  else if (e.key === 'ArrowRight') playerVideo.currentTime = Math.min(playerVideo.duration || 0, playerVideo.currentTime + 10);
-  else if (e.key === 'm') playerVideo.muted = !playerVideo.muted;
-  else if (e.key === 'f') document.getElementById('btnFs').click();
+  if (typing) return;
+  const k = e.key.toLowerCase();
+  if (e.key === ' ' || k === 'k') { e.preventDefault(); if (playerVideo.paused) playerVideo.play().catch(() => {}); else playerVideo.pause(); }
+  else if (e.key === 'ArrowLeft' || k === 'j') { playerVideo.currentTime = Math.max(0, playerVideo.currentTime - 10); showControls(); }
+  else if (e.key === 'ArrowRight') { playerVideo.currentTime = Math.min(playerVideo.duration || 0, playerVideo.currentTime + 10); showControls(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); playerVideo.volume = Math.min(1, playerVideo.volume + 0.1); volEl.value = playerVideo.volume; syncMute(); showControls(); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); playerVideo.volume = Math.max(0, playerVideo.volume - 0.1); volEl.value = playerVideo.volume; syncMute(); showControls(); }
+  else if (k === 'm') { playerVideo.muted = !playerVideo.muted; syncMute(); }
+  else if (k === 'f') toggleFullscreen();
+  else if (k === 'p') $('btnPip').click();
+  else if (k === 'r') $('btnRotate').click();
+  else if (k === 's') $('btnShot').click();
+  else if (k === 'l') $('btnLoop').click();
+  else if (k === 'w') $('btnWide').click();
+  else if (k === '?') toggleHelp();
+  else if (e.key >= '0' && e.key <= '9') { const d = playerVideo.duration || 0; if (d) playerVideo.currentTime = d * (Number(e.key) / 10); }
 });
 
-// --- Fetch ----------------------------------------------------------------
-
-async function fetchFiles() {
+// --- Fetch -----------------------------------------------------------------
+async function fetchFiles(){
   const link = linkEl.value.trim();
   if (!link) { setStatus('Please paste a link first.', true); return; }
   fetchBtn.disabled = true;
-  filesCard.classList.add('hidden');
-  setStatus('Fetching file list...');
+  setStatus('Fetching file list\u2026');
   try {
     const resp = await fetch('/api/resolve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ link })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ link })
     });
     const data = await resp.json();
     if (!data.ok) { setStatus(data.error, true); return; }
@@ -1369,6 +1657,7 @@ async function fetchFiles() {
       ? 'Files ready. (TeraBox listing was busy, so these came from the helper service.)'
       : 'Share resolved.');
     renderFiles(data.share);
+    switchTab('files');
   } catch (err) {
     setStatus('Request failed: ' + err.message, true);
   } finally {
@@ -1379,15 +1668,14 @@ async function fetchFiles() {
 fetchBtn.addEventListener('click', fetchFiles);
 linkEl.addEventListener('keydown', e => { if (e.key === 'Enter') fetchFiles(); });
 clearBtn.addEventListener('click', () => {
-  linkEl.value = '';
-  filesCard.classList.add('hidden');
-  setStatus('');
-  linkEl.focus();
+  linkEl.value = ''; filesEl.innerHTML = ''; filesCount.textContent = '0';
+  filesEmpty.classList.remove('hidden'); setStatus(''); linkEl.focus();
 });
-histClearBtn.addEventListener('click', () => {
-  saveHistory([]);
-  renderHistory();
+pasteBtn.addEventListener('click', async () => {
+  try { const t = await navigator.clipboard.readText(); if (t) { linkEl.value = t.trim(); setStatus('Pasted. Press Fetch files.'); } }
+  catch (e) { setStatus('Clipboard blocked - paste manually.', true); }
 });
+histClearBtn.addEventListener('click', () => { saveHistory([]); renderHistory(); });
 
 renderHistory();
 </script>
