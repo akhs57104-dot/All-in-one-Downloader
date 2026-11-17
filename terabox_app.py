@@ -23,15 +23,20 @@ and the download is retried with it.
 Because that cookie is now required for step 4, two anonymous fallbacks sit
 behind it, tried in order:
 
-  * a third-party resolver (iteraplay.com) that holds its own TeraBox account
-    and returns the original file with Range support — full quality, but rate
-    limited and it sees every link (TERABOX_FALLBACK=off disables it);
+  * third-party resolvers (playterabox.com, then iteraplay.com) that hold their
+    own TeraBox accounts. playterabox returns a full-length, Range-capable link
+    plus a complete HLS playlist, so download and full-length playback both work
+    with no quota; iteraplay is a rate-limited secondary. Both see every link
+    (TERABOX_FALLBACK=off disables them). TeraBox never gives an anonymous
+    visitor the original file, so a helper's copy is a transcoded MPEG-TS:
+    playback carries the full duration, but a download arrives as `.ts`;
   * TeraBox's own /share/streaming transcode, which needs no cookie but is only
     a fixed ~30-second preview, so it is used for playback, never a download.
 
 Run:  python3 terabox_app.py   (serves on PORT, default 12000)
 """
 
+import hashlib
 import json
 import os
 import re
@@ -322,35 +327,81 @@ def resolve_share(link: str) -> dict:
     }
 
 # ---------------------------------------------------------------------------
-# Helper service fallback
+# Helper services (anonymous full-length fallback)
 # ---------------------------------------------------------------------------
 #
-# TeraBox now hands the bytes of a shared file only to a signed-in session, so an
-# anonymous visitor can list a share but never download it. iteraplay.com is a
-# third-party resolver holding its own TeraBox account; it returns the original
-# file (not a transcode) with Range support, which makes both download and
-# in-browser playback work. It is used only when TeraBox's own route is
-# unavailable, it discloses each link to that service, and it is rate-limited
-# (a few videos per six hours), so its answers are cached briefly. Set
-# TERABOX_FALLBACK=off to disable it entirely.
+# TeraBox hands a shared file to an anonymous visitor only as a transcoded
+# MPEG-TS stream, never the original MP4 — and only through third-party
+# resolvers that hold their own TeraBox account. playterabox.com is the primary
+# one: it returns a full-length link (Range-capable) plus a complete HLS
+# playlist, both of which we proxy. iteraplay.com is a secondary, quota-limited
+# source. They are tried in order, disclose each link to that service, and their
+# answers are cached briefly. Set TERABOX_FALLBACK=off to disable them all.
+#
+# Each resolved file is described as:
+#   {"dl": download_url, "hls": playlist_url_or_None, "size": bytes}
 
 ITERAPLAY_HOME = "https://iteraplay.com/"
 ITERAPLAY_ENDPOINT = "https://iteraplay.com/api/download"
 
-# surl -> (resolved_at, {filename: direct_url}); the helper's links expire in
-# minutes, so this only spares a repeat click, it never outlives the link.
-_FALLBACK_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
+PLAYTERABOX_HOME = "https://playterabox.com/"
+PLAYTERABOX_ENDPOINT = "https://playterabox.com/api/fetch-video"
+# The site signs its own requests with this fixed salt; a fresh MD5 per call is
+# what it expects, not a secret of ours.
+PLAYTERABOX_SALT = "T9do@SM1?xGn5"
+PLAYTERABOX_UA = ("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36")
+
+# surl -> (resolved_at, provider, {filename: info}); the helpers' links expire
+# in minutes, so this only spares a repeat click, it never outlives the link.
+_FALLBACK_CACHE: dict[str, tuple[float, str, dict[str, dict]]] = {}
 _FALLBACK_TTL = 240
 
 def _fallback_enabled() -> bool:
     return os.environ.get("TERABOX_FALLBACK", "on").strip().lower() not in ("off", "0", "no", "false")
 
-def _fallback_files(surl: str) -> dict[str, str]:
-    """Map `filename -> direct url` for one share via the helper service."""
-    cached = _FALLBACK_CACHE.get(surl)
-    if cached and (time.time() - cached[0]) < _FALLBACK_TTL:
-        return cached[1]
+def _playterabox_files(surl: str) -> dict[str, dict]:
+    """Resolve via playterabox.com (full length, no quota)."""
+    stamp = int(time.time())
+    token = hashlib.md5(f"{PLAYTERABOX_SALT}{stamp}/api/stream.php".encode()).hexdigest()
+    try:
+        resp = _request_session().post(
+            f"{PLAYTERABOX_ENDPOINT}?token={token}&t={stamp}",
+            json={"url": f"https://www.terabox.com/s/{surl}"},
+            headers={"accept": "*/*", "content-type": "application/json",
+                     "origin": PLAYTERABOX_HOME.rstrip("/"),
+                     "referer": PLAYTERABOX_HOME,
+                     "user-agent": PLAYTERABOX_UA},
+            timeout=60)
+    except _request_error() as exc:
+        raise TeraBoxError(f"playterabox.com is not responding ({exc}).") from exc
+    try:
+        data = resp.json()
+    except ValueError:
+        raise TeraBoxError("playterabox.com sent an unreadable reply.")
+    if resp.status_code >= 400 or data.get("status") != "success":
+        note = data.get("message") or data.get("status") or resp.status_code
+        raise TeraBoxError(f"playterabox.com could not open that link ({note}).")
 
+    files = {}
+    for entry in data.get("list") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        dl = str(entry.get("download_link") or entry.get("normal_dlink") or "").strip()
+        if not (name and dl):
+            continue
+        hls = str(entry.get("stream_url") or "").strip()
+        if hls.startswith("/"):
+            hls = PLAYTERABOX_HOME.rstrip("/") + hls
+        files[name] = {"dl": dl, "hls": hls or None,
+                       "size": int(entry.get("size") or 0)}
+    if not files:
+        raise TeraBoxError("playterabox.com found no downloadable file behind that link.")
+    return files
+
+def _iteraplay_files(surl: str) -> dict[str, dict]:
+    """Resolve via iteraplay.com (full quality, but a small guest quota)."""
     session = _request_session()
     headers = {
         "accept": "*/*",
@@ -368,52 +419,79 @@ def _fallback_files(surl: str) -> dict[str, str]:
                             json={"url": f"https://www.terabox.com/s/{surl}"},
                             headers=headers, cookies=cookies, timeout=60)
     except _request_error() as exc:
-        raise TeraBoxError(f"The helper service is not responding ({exc}).") from exc
+        raise TeraBoxError(f"iteraplay.com is not responding ({exc}).") from exc
 
     try:
         data = resp.json()
     except ValueError:
-        raise TeraBoxError("The helper service sent an unreadable reply.")
+        raise TeraBoxError("iteraplay.com sent an unreadable reply.")
 
     usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
     if data.get("error") == "usage_limit" or resp.status_code == 429:
         limit = usage.get("limit")
         allowance = f" ({limit} resolutions per 6 hours)" if limit else ""
-        raise TeraBoxError(
-            f"The free helper route has used up its quota{allowance}. Try again "
-            f"later, or set TERABOX_COOKIE to download directly, or "
-            f"TERABOX_FALLBACK=off to disable the helper.")
+        raise TeraBoxError(f"iteraplay.com has used up its free quota{allowance}.")
     if resp.status_code >= 400 or data.get("status") != "success":
         note = data.get("message") or data.get("status") or resp.status_code
-        raise TeraBoxError(
-            f"The helper service could not open that link ({note}). It may be "
-            f"private, removed, or password-protected.")
+        raise TeraBoxError(f"iteraplay.com could not open that link ({note}).")
 
-    links = {}
+    files = {}
     for entry in data.get("list") or []:
         if not isinstance(entry, dict) or entry.get("is_dir"):
             continue
         name = str(entry.get("name") or "").strip()
-        url = str(entry.get("normal_dlink") or "").strip()
-        if name and url:
-            links[name] = url
-    if not links:
-        raise TeraBoxError("The helper service found no downloadable file behind that link.")
+        dl = str(entry.get("normal_dlink") or "").strip()
+        if name and dl:
+            files[name] = {"dl": dl, "hls": None,
+                           "size": int(entry.get("size") or 0)}
+    if not files:
+        raise TeraBoxError("iteraplay.com found no downloadable file behind that link.")
+    return files
 
-    _FALLBACK_CACHE[surl] = (time.time(), links)
-    return links
+_HELPER_PROVIDERS = (
+    ("playterabox", _playterabox_files),
+    ("iteraplay", _iteraplay_files),
+)
+
+def _fallback_files(surl: str) -> tuple[str, dict[str, dict]]:
+    """Return `(provider, {filename: info})` from the first helper that works."""
+    cached = _FALLBACK_CACHE.get(surl)
+    if cached and (time.time() - cached[0]) < _FALLBACK_TTL:
+        return cached[1], cached[2]
+
+    errors = []
+    for name, resolver in _HELPER_PROVIDERS:
+        try:
+            files = resolver(surl)
+        except TeraBoxError as exc:
+            errors.append(exc)
+            continue
+        _FALLBACK_CACHE[surl] = (time.time(), name, files)
+        return name, files
+    if not errors:
+        raise TeraBoxError("No helper service could resolve that link.")
+    # A quota notice is more actionable than a generic failure, so prefer it.
+    quota = next((e for e in errors if "quota" in str(e).lower()), None)
+    raise quota or errors[0]
 
 def resolve_share_fallback(link: str) -> dict:
-    """Resolve a share using the helper service alone (used when TeraBox
+    """Resolve a share using a helper service alone (used when TeraBox
     listing is rate-limited)."""
     surl = extract_share_id(link)
-    links = _fallback_files(surl)
-    files = []
-    for name, url in links.items():
-        files.append({"id": name, "fs_id": None, "name": name, "size": 0,
-                      "size_text": "", "is_video": _is_video(name),
-                      "direct_url": url})
-    return {"surl": surl, "source": "helper", "share_username": "", "files": files}
+    provider, files = _fallback_files(surl)
+    out = []
+    for name, info in files.items():
+        size = info.get("size") or 0
+        out.append({"id": name, "fs_id": None, "name": name, "size": size,
+                    "size_text": _human_size(size), "is_video": _is_video(name)})
+    return {"surl": surl, "source": provider, "share_username": "", "files": out}
+
+def _human_size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.2f} {unit}" if unit != "B" else f"{n} B"
+        n /= 1024
+    return f"{n:.2f} GB"
 
 
 # ---------------------------------------------------------------------------
@@ -487,10 +565,12 @@ def api_resolve():
     except Exception as exc:  # noqa: BLE001 - surfaced to the UI
         return jsonify({"ok": False, "error": f"Unexpected error: {exc}"}), 500
 
-def _proxy_stream(upstream, *, as_attachment: bool, filename: str) -> Response:
+def _proxy_stream(upstream, *, as_attachment: bool, filename: str,
+                  content_type: str | None = None) -> Response:
     """Relay an upstream response, preserving Range/length semantics."""
     headers = {
-        "Content-Type": upstream.headers.get("Content-Type", "application/octet-stream"),
+        "Content-Type": content_type or upstream.headers.get(
+            "Content-Type", "application/octet-stream"),
         "Accept-Ranges": "bytes",
     }
     if as_attachment:
@@ -521,106 +601,176 @@ def _terabox_dlink(share: dict, chosen: dict):
     return session, cookie, _make_dlink(session, share["surl"], share,
                                         chosen["fs_id"], context)
 
+def _helper_entry(link: str, fs_id: str, name_hint: str) -> tuple[str, dict]:
+    """Find one file's helper entry by name. Returns `(name, info)`.
+
+    The frontend passes the file's name (`name_hint`); the numeric `fs_id` is
+    useless to a helper, which keys its list by filename.
+    """
+    wanted = name_hint or (fs_id[5:] if fs_id.startswith("name:") else "")
+    _provider, files = _fallback_files(extract_share_id(link))
+    if wanted and wanted in files:
+        return wanted, files[wanted]
+    if wanted:
+        # Fall back to a case-insensitive match before giving up.
+        for name, info in files.items():
+            if name.lower() == wanted.lower():
+                return name, info
+    name = next(iter(files))
+    return name, files[name]
+
 def _serve(link: str, fs_id: str, *, mode: str):
-    """Download or stream one file.
+    """Serve one file, whole or as a playlist.
 
     `mode` is one of:
-      "download" — TeraBox dlink, then the helper service. Errors if neither
-                   can serve the whole file; never a partial/preview stream.
-      "stream"   — the same direct routes, sent inline for native playback.
-      "hls"      — TeraBox's 30-second preview transcode, as a same-origin
-                   M3U8 playlist, for playback when nothing else works.
+      "download" — the full file as an attachment. Uses TeraBox's own dlink when
+                   a cookie is set (the original MP4); otherwise a helper's
+                   full-length stream, which is a transcoded MPEG-TS, so the
+                   name is given a .ts extension.
+      "hls"      — a same-origin M3U8 playlist for playback. Prefers a helper's
+                   complete playlist (full length); falls back to TeraBox's own
+                   transcode, which is only a 30-second preview.
     """
     if not link:
         return jsonify({"ok": False, "error": "Missing link."}), 400
 
-    share = None
-    chosen = None
+    name_hint = request.args.get("name", "").strip()
     terabox_error = None
     helper_error = None
-    if is_allowed_share_url(link) and not fs_id.startswith("name:"):
+
+    # TeraBox's own dlink is the only route that yields the original MP4, and it
+    # needs a signed-in cookie, so it is tried first and only when one is set.
+    if mode == "download" and os.environ.get("TERABOX_COOKIE") \
+            and is_allowed_share_url(link) and not fs_id.startswith("name:"):
         try:
             share = resolve_share(link)
-        except TeraBoxError as exc:
-            terabox_error = exc
-        else:
             chosen = next((f for f in share["files"]
                            if str(f["fs_id"]) == str(fs_id)), None) or share["files"][0]
-
-    direct = mode in ("download", "stream")
-
-    # 1) TeraBox's own dlink (only works with a signed-in cookie).
-    if direct and share is not None and chosen is not None:
-        try:
             session, cookie, dlink = _terabox_dlink(share, chosen)
         except TeraBoxError as exc:
             terabox_error = exc
         else:
-            headers = {"User-Agent": BROWSER_UA, "Referer": share["referer"]}
+            headers = {"User-Agent": BROWSER_UA, "Referer": share["referer"],
+                       "Cookie": cookie}
             if request.headers.get("Range"):
                 headers["Range"] = request.headers["Range"]
-            if cookie:
-                headers["Cookie"] = cookie
             upstream = session.get(dlink, headers=headers, stream=True, timeout=60)
             if upstream.status_code in (200, 206):
-                return _proxy_stream(upstream, as_attachment=(mode == "download"),
+                return _proxy_stream(upstream, as_attachment=True,
                                      filename=chosen["name"])
             upstream.close()
             terabox_error = TeraBoxError(
                 f"TeraBox returned status {upstream.status_code} for the file.")
 
-    # 2) The helper service (no cookie, but a small quota).
-    if direct and _fallback_enabled():
+    if _fallback_enabled():
         try:
-            surl = extract_share_id(link)
-            links = _fallback_files(surl)
-            wanted = fs_id[5:] if fs_id.startswith("name:") else None
-            if wanted is None and chosen is not None:
-                wanted = chosen["name"]
-            url = links.get(wanted) if wanted else next(iter(links.values()))
-            if url is None:
-                raise TeraBoxError("That file was not offered by the helper service.")
-            helper_headers = {"User-Agent": BROWSER_UA, "Referer": ITERAPLAY_HOME}
-            if request.headers.get("Range"):
-                helper_headers["Range"] = request.headers["Range"]
-            upstream = _request_session().get(url, headers=helper_headers,
-                                              stream=True, timeout=60)
-            if upstream.status_code in (200, 206):
-                return _proxy_stream(upstream, as_attachment=(mode == "download"),
-                                     filename=wanted or "download")
-            upstream.close()
-            helper_error = TeraBoxError(
-                f"The helper service returned status {upstream.status_code}.")
+            name, info = _helper_entry(link, fs_id, name_hint)
         except TeraBoxError as exc:
             helper_error = exc
-
-    # 3) TeraBox's anonymous HLS transcode, for previewing only.
-    #
-    # Measured against several shares: TeraBox returns a fixed 30-second window
-    # (three segments, then ENDLIST) regardless of file length, so it is never a
-    # real download and is offered only when playback would otherwise fail.
-    if mode == "hls" and share is not None and chosen is not None \
-            and chosen.get("is_video"):
-        try:
-            segments, referer = _hls_playlist(share, chosen)
-        except TeraBoxError as exc:
-            terabox_error = exc
         else:
-            token = secrets.token_urlsafe(12)
-            _HLS_STORE[token] = (time.time(), segments, referer)
-            playlist = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:15",
-                        "#EXT-X-MEDIA-SEQUENCE:0"]
-            for i in range(len(segments)):
-                # Root-relative so the player uses whatever host it reached us
-                # on (works behind the proxy) and never a hardcoded origin.
-                playlist.append(f"#EXTINF:10,\n/api/hls/{token}/{i}.ts")
-            playlist.append("#EXT-X-ENDLIST")
-            return Response("\n".join(playlist) + "\n",
-                            headers={"Content-Type": "application/vnd.apple.mpegurl",
-                                     "Cache-Control": "no-store"})
+            if mode == "download":
+                # The helper's stream is a transcoded MPEG-TS, not the original
+                # container, so it is offered with a .ts extension.
+                headers = {"User-Agent": BROWSER_UA}
+                if request.headers.get("Range"):
+                    headers["Range"] = request.headers["Range"]
+                upstream = _request_session().get(info["dl"], headers=headers,
+                                                  stream=True, timeout=60)
+                if upstream.status_code in (200, 206):
+                    return _proxy_stream(upstream, as_attachment=True,
+                                         filename=_ts_name(name),
+                                         content_type="video/mp2t")
+                upstream.close()
+                helper_error = TeraBoxError(
+                    f"The helper returned status {upstream.status_code} for the file.")
+            elif info.get("hls"):
+                playlist = _fetch_playlist(info["hls"])
+                if playlist is not None:
+                    return playlist
+
+    # Fall back to TeraBox's own transcode. It is a fixed 30-second preview, so
+    # it is only ever offered for playback, never as a download.
+    if mode == "hls":
+        try:
+            preview = _terabox_preview(link, fs_id)
+        except TeraBoxError as exc:
+            terabox_error = terabox_error or exc
+        else:
+            if preview is not None:
+                return preview
 
     error = helper_error or terabox_error
-    return jsonify({"ok": False, "error": str(error) if error else "Could not resolve that file."}), 400
+    if mode == "download":
+        return jsonify({"ok": False, "error": str(error) if error
+                        else "No download route is available for that file."}), 400
+    return jsonify({"ok": False, "error": str(error) if error
+                    else "No stream is available for that file."}), 400
+
+def _ts_name(name: str) -> str:
+    """Give a transcoded stream a .ts name so players expect the right format."""
+    base = name.rsplit(".", 1)[0] if "." in name else name
+    return base + ".ts"
+
+def _fetch_playlist(url: str):
+    """Proxy a helper's HLS playlist through this server, or return None."""
+    try:
+        resp = _request_session().get(url, headers={"Referer": PLAYTERABOX_HOME},
+                                      timeout=60)
+    except _request_error():
+        return None
+    return _store_playlist(resp.text or "", PLAYTERABOX_HOME)
+
+def _store_playlist(text: str, referer: str):
+    """Store an upstream M3U8 and return it rewritten to same-origin segment URLs."""
+    if not text.startswith("#EXTM3U"):
+        return None
+    segments = [line.strip() for line in text.splitlines()
+                if line.strip().startswith("http")]
+    if not segments:
+        return None
+    token = secrets.token_urlsafe(12)
+    _HLS_STORE[token] = (time.time(), segments, referer)
+
+    out, index = [], 0
+    for line in text.splitlines():
+        if line.strip().startswith("http"):
+            # Root-relative so the player uses whatever host it reached us on
+            # (works behind the proxy) and never a hardcoded origin.
+            out.append(f"/api/hls/{token}/{index}.ts")
+            index += 1
+        else:
+            out.append(line)
+    if "#EXT-X-ENDLIST" not in text:
+        out.append("#EXT-X-ENDLIST")
+    return Response("\n".join(out) + "\n",
+                    headers={"Content-Type": "application/vnd.apple.mpegurl",
+                             "Cache-Control": "no-store"})
+
+def _serve_segments(segments: list, referer: str):
+    """Build a same-origin playlist from a bare list of segment URLs."""
+    token = secrets.token_urlsafe(12)
+    _HLS_STORE[token] = (time.time(), segments, referer)
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:15",
+             "#EXT-X-MEDIA-SEQUENCE:0"]
+    for i in range(len(segments)):
+        lines.append("#EXTINF:10,")
+        lines.append(f"/api/hls/{token}/{i}.ts")
+    lines.append("#EXT-X-ENDLIST")
+    return Response("\n".join(lines) + "\n",
+                    headers={"Content-Type": "application/vnd.apple.mpegurl",
+                             "Cache-Control": "no-store"})
+
+def _terabox_preview(link: str, fs_id: str):
+    """TeraBox's own 30-second transcode as a same-origin playlist, or None."""
+    if not is_allowed_share_url(link) or fs_id.startswith("name:"):
+        return None
+    share = resolve_share(link)
+    chosen = next((f for f in share["files"]
+                   if str(f["fs_id"]) == str(fs_id)), None) or share["files"][0]
+    if not chosen.get("is_video"):
+        return None
+    segments, referer = _hls_playlist(share, chosen)
+    return _serve_segments(segments, referer)
 
 
 @app.route("/api/hls/<token>/<int:index>.ts")
@@ -652,9 +802,34 @@ def api_download():
 
 @app.route("/api/stream")
 def api_stream():
-    """Direct-route stream for native browser playback (an MP4)."""
+    """Alias for /api/hls, kept so older links keep working."""
     return _serve(request.args.get("link", ""), request.args.get("fs_id", ""),
-                  mode="stream")
+                  mode="hls")
+
+
+@app.route("/api/prepare")
+def api_prepare():
+    """Resolve (and cache) a file's helper entry, so the following /api/hls
+    starts immediately. Returns JSON, never bytes.
+
+    The helper services take several seconds to answer; doing that work here,
+    behind a spinner, stops the player from giving up while the real playlist is
+    still being arranged.
+    """
+    link = request.args.get("link", "")
+    fs_id = request.args.get("fs_id", "")
+    name_hint = request.args.get("name", "").strip()
+    if not link:
+        return jsonify({"ok": False, "error": "Missing link."}), 400
+
+    if not _fallback_enabled():
+        return jsonify({"ok": True, "provider": "terabox"})
+    try:
+        name, info = _helper_entry(link, fs_id, name_hint)
+    except TeraBoxError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "provider": "helper", "name": name,
+                    "hls": bool(info.get("hls"))})
 
 
 @app.route("/api/hls")
@@ -702,22 +877,68 @@ INDEX_HTML = """<!doctype html>
   .file a, .file button { text-decoration:none; background:var(--primary); color:#fff; padding:8px 14px;
             border-radius:8px; font-size:.82rem; font-weight:600; border:0; cursor:pointer; }
   .file .play { background:#16a34a; }
-  .hidden { display:none; }
+  .hidden { display:none !important; }
   .note { background:#eefaf0; border:1px solid #b7e4c1; color:#1f5f36; border-radius:10px;
           padding:12px 14px; font-size:.82rem; line-height:1.45; margin-bottom:16px; }
   .note code { background:#d6f0dd; padding:1px 5px; border-radius:4px; font-size:.8rem; }
-  #player { position:fixed; inset:0; background:rgba(12,24,38,.82); display:flex; align-items:center;
-            justify-content:center; padding:20px; z-index:50; }
-  #player.hidden { display:none; }
-  #player .box { background:#0b1520; border-radius:14px; width:min(960px,100%); overflow:hidden;
-                 box-shadow:0 12px 40px rgba(0,0,0,.45); }
-  #player .head { display:flex; align-items:center; justify-content:space-between; gap:12px;
-                  padding:12px 16px; color:#eaf1f8; }
-  #player .head .t { font-size:.9rem; font-weight:600; overflow:hidden; text-overflow:ellipsis;
-                     white-space:nowrap; }
-  #player .head button { background:#22384f; color:#fff; }
-  #player video { width:100%; display:block; background:#000; max-height:78vh; }
-  #player .pmsg { color:#c9d6e3; font-size:.85rem; padding:0 16px 16px; }
+  .card-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .card-head label { margin:0; }
+  .link-btn { background:none; border:0; color:var(--primary); font-size:.8rem; font-weight:600;
+              cursor:pointer; padding:4px 6px; }
+  .empty { color:var(--muted); font-size:.83rem; padding:4px 0; }
+
+  /* History */
+  .hist-item { display:flex; align-items:center; gap:12px; padding:9px 10px; border:1px solid #e2eaf2;
+               border-radius:8px; margin-bottom:8px; }
+  .hist-badge { flex-shrink:0; width:30px; height:30px; border-radius:8px; display:flex;
+                align-items:center; justify-content:center; font-size:14px; background:#e7eef7; }
+  .hist-badge.played { background:#dcfce7; }
+  .hist-badge.downloaded { background:#dbeafe; }
+  .hist-meta { min-width:0; flex:1; }
+  .hist-name { font-size:.86rem; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hist-sub { font-size:.74rem; color:var(--muted); }
+  .hist-actions { display:flex; gap:6px; flex-shrink:0; }
+  .hist-actions button { background:#e7eef7; color:var(--text); padding:6px 11px; font-size:.76rem; }
+  .hist-actions .play { background:#16a34a; color:#fff; }
+
+  /* Player */
+  #player { position:fixed; inset:0; background:rgba(6,14,24,.9); display:flex; align-items:center;
+            justify-content:center; padding:16px; z-index:50; }
+  #player .box { background:#0b1520; border-radius:14px; width:min(1040px,100%); overflow:hidden;
+                 box-shadow:0 24px 60px rgba(0,0,0,.55); display:flex; flex-direction:column; }
+  #player .head { display:flex; align-items:center; gap:12px; padding:12px 16px; color:#eaf1f8; }
+  #player .head .t { flex:1; font-size:.92rem; font-weight:600; overflow:hidden;
+                     text-overflow:ellipsis; white-space:nowrap; }
+  #player .head .tag { font-size:.7rem; color:#8fb0cc; border:1px solid #274054; border-radius:999px;
+                       padding:2px 9px; flex-shrink:0; }
+  #player .head .icon-btn { background:transparent; color:#cfe0ef; padding:6px 9px; font-size:1rem; }
+  #player .stage { position:relative; background:#000; }
+  #player video { width:100%; display:block; background:#000; max-height:74vh; }
+  #player .spinner { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+                     pointer-events:none; }
+  #player .spinner::after { content:""; width:42px; height:42px; border-radius:50%;
+        border:3px solid rgba(255,255,255,.25); border-top-color:#fff; animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  #player .controls { display:flex; flex-direction:column; gap:6px; padding:10px 14px 14px;
+                      background:#0b1520; }
+  #player .seek { width:100%; -webkit-appearance:none; appearance:none; height:5px; border-radius:3px;
+                  background:#22384f; cursor:pointer; outline:none; }
+  #player .seek::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px; border-radius:50%;
+                  background:var(--primary); cursor:pointer; }
+  #player .seek::-moz-range-thumb { width:13px; height:13px; border:0; border-radius:50%;
+                  background:var(--primary); cursor:pointer; }
+  #player .ctrl-row { display:flex; align-items:center; gap:12px; color:#dbe7f2; }
+  #player .ctrl-row button { background:transparent; color:#dbe7f2; padding:6px 8px; font-size:1rem; }
+  #player .ctrl-row button:hover { color:#fff; }
+  #player .time { font-size:.78rem; font-variant-numeric:tabular-nums; color:#a9c1d6; min-width:96px; }
+  #player .spacer { flex:1; }
+  #player select { background:#16283a; color:#dbe7f2; border:1px solid #274054; border-radius:6px;
+                   padding:5px 8px; font-size:.78rem; }
+  #player .vol { width:80px; -webkit-appearance:none; appearance:none; height:4px; border-radius:3px;
+                 background:#22384f; cursor:pointer; }
+  #player .vol::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px; border-radius:50%;
+                 background:#dbe7f2; cursor:pointer; }
+  #player .pmsg { color:#a9c1d6; font-size:.8rem; padding:0 16px 14px; min-height:1em; }
 </style>
 </head>
 <body>
@@ -726,12 +947,12 @@ INDEX_HTML = """<!doctype html>
   <div class="sub">Paste a public TeraBox share link to list, play, and download its files.</div>
 
   <div id="note" class="note">
-    No account needed: when TeraBox refuses the direct download, the app resolves
-    the file through a helper service instead. That service is rate-limited
-    (a few files per six hours) and sees the links you paste, so set
-    <code>TERABOX_COOKIE</code> (see the README) for unlimited direct downloads,
-    or <code>TERABOX_FALLBACK=off</code> to disable the helper. Playback falls
-    back to TeraBox's own 30-second preview when nothing else is available.
+    No account needed. TeraBox refuses anonymous direct downloads, so the app
+    streams the full video through a helper service. That service sees the links
+    you paste, and its copy is a transcoded stream (downloaded as <code>.ts</code>),
+    not TeraBox's original file. Set <code>TERABOX_COOKIE</code> (see the README)
+    to download the original MP4 instead, or <code>TERABOX_FALLBACK=off</code>
+    to disable the helper.
   </div>
 
   <div class="card">
@@ -748,16 +969,49 @@ INDEX_HTML = """<!doctype html>
     <label id="filesTitle">Files</label>
     <div id="files" class="files"></div>
   </div>
+
+  <div class="card">
+    <div class="card-head">
+      <label>History</label>
+      <button id="histClear" class="link-btn hidden">Clear history</button>
+    </div>
+    <div id="history"></div>
+  </div>
 </div>
 
 <div id="player" class="hidden">
   <div class="box">
     <div class="head">
       <span class="t" id="playerTitle">Video</span>
-      <button id="playerClose" class="ghost">Close</button>
+      <span class="tag hidden" id="playerTag"></span>
+      <button class="icon-btn" id="playerClose" title="Close (Esc)">&#10005;</button>
     </div>
-    <video id="playerVideo" controls autoplay playsinline></video>
-    <div class="pmsg" id="playerMsg"></div>
+    <div class="stage">
+      <video id="playerVideo" playsinline></video>
+      <div class="spinner" id="playerSpinner"></div>
+    </div>
+    <div class="controls">
+      <input class="seek" id="seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="Seek">
+      <div class="ctrl-row">
+        <button id="btnPlay" title="Play/Pause (Space)">&#9654;</button>
+        <button id="btnBack" title="Back 10s (&#8592;)">&#9198;</button>
+        <button id="btnFwd" title="Forward 10s (&#8594;)">&#9197;</button>
+        <span class="time" id="time">0:00 / 0:00</span>
+        <span class="spacer"></span>
+        <input class="vol" id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+        <button id="btnMute" title="Mute (M)">&#128266;</button>
+        <select id="rate" title="Playback speed">
+          <option value="0.5">0.5&times;</option>
+          <option value="0.75">0.75&times;</option>
+          <option value="1" selected>1&times;</option>
+          <option value="1.25">1.25&times;</option>
+          <option value="1.5">1.5&times;</option>
+          <option value="2">2&times;</option>
+        </select>
+        <button id="btnFs" title="Fullscreen (F)">&#9974;</button>
+      </div>
+      <div class="pmsg" id="playerMsg"></div>
+    </div>
   </div>
 </div>
 
@@ -774,11 +1028,102 @@ const player = document.getElementById('player');
 const playerVideo = document.getElementById('playerVideo');
 const playerTitle = document.getElementById('playerTitle');
 const playerMsg = document.getElementById('playerMsg');
+const playerTag = document.getElementById('playerTag');
+const playerSpinner = document.getElementById('playerSpinner');
+const seekEl = document.getElementById('seek');
+const timeEl = document.getElementById('time');
+const volEl = document.getElementById('vol');
+const rateEl = document.getElementById('rate');
+const historyEl = document.getElementById('history');
+const histClearBtn = document.getElementById('histClear');
 
 function setStatus(msg, isError) {
   statusEl.textContent = msg || '';
   statusEl.className = isError ? 'error' : '';
 }
+
+function fmtTime(sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const s = Math.floor(sec % 60), m = Math.floor(sec / 60) % 60, h = Math.floor(sec / 3600);
+  const mm = h ? String(m).padStart(2, '0') : String(m);
+  return (h ? h + ':' : '') + mm + ':' + String(s).padStart(2, '0');
+}
+
+// --- History (localStorage) ------------------------------------------------
+
+const HIST_KEY = 'terabox.history.v1';
+const HIST_MAX = 30;
+
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HIST_KEY)) || []; }
+  catch (e) { return []; }
+}
+
+function saveHistory(items) {
+  try { localStorage.setItem(HIST_KEY, JSON.stringify(items.slice(0, HIST_MAX))); }
+  catch (e) { /* storage full or blocked; history is best-effort */ }
+}
+
+function addHistory(entry) {
+  const items = loadHistory();
+  const key = entry.kind + '|' + entry.name + '|' + (entry.link || '');
+  const rest = items.filter(it => (it.kind + '|' + it.name + '|' + (it.link || '')) !== key);
+  rest.unshift(Object.assign({ at: Date.now() }, entry));
+  saveHistory(rest);
+  renderHistory();
+}
+
+function renderHistory() {
+  const items = loadHistory();
+  historyEl.innerHTML = '';
+  histClearBtn.classList.toggle('hidden', items.length === 0);
+  if (!items.length) {
+    const p = document.createElement('div');
+    p.className = 'empty';
+    p.textContent = 'Videos you play or download will show up here.';
+    historyEl.append(p);
+    return;
+  }
+  for (const it of items) {
+    const row = document.createElement('div');
+    row.className = 'hist-item';
+
+    const badge = document.createElement('div');
+    badge.className = 'hist-badge ' + it.kind;
+    badge.textContent = it.kind === 'played' ? '\u25B6' : '\u2193';
+
+    const meta = document.createElement('div');
+    meta.className = 'hist-meta';
+    const name = document.createElement('div');
+    name.className = 'hist-name';
+    name.textContent = it.name;
+    const sub = document.createElement('div');
+    sub.className = 'hist-sub';
+    const when = new Date(it.at).toLocaleString();
+    sub.textContent = (it.kind === 'played' ? 'Played' : 'Downloaded') + ' \u00B7 ' + when;
+    meta.append(name, sub);
+
+    const actions = document.createElement('div');
+    actions.className = 'hist-actions';
+    const f = { id: it.id, name: it.name, is_video: true };
+    if (it.is_video) {
+      const play = document.createElement('button');
+      play.className = 'play';
+      play.textContent = 'Play';
+      play.addEventListener('click', () => openPlayer(f, it.link));
+      actions.append(play);
+    }
+    const dl = document.createElement('button');
+    dl.textContent = 'Download';
+    dl.addEventListener('click', () => startDownload(f, dl, it.link));
+    actions.append(dl);
+
+    row.append(badge, meta, actions);
+    historyEl.append(row);
+  }
+}
+
+// --- File list -------------------------------------------------------------
 
 function renderFiles(share) {
   filesEl.innerHTML = '';
@@ -817,17 +1162,35 @@ function renderFiles(share) {
   filesCard.classList.remove('hidden');
 }
 
-async function startDownload(f, button) {
+function mediaUrl(f, endpoint, link) {
+  return endpoint + '?link=' + encodeURIComponent(link || linkEl.value.trim()) +
+         '&fs_id=' + encodeURIComponent(f.id) +
+         '&name=' + encodeURIComponent(f.name || '') + '&t=' + Date.now();
+}
+
+function dispositionName(header) {
+  if (!header) return '';
+  const star = /filename[*]=UTF-8''([^;]+)/i.exec(header);
+  if (star) { try { return decodeURIComponent(star[1]); } catch (e) { return star[1]; } }
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  return plain ? plain[1] : '';
+}
+
+async function startDownload(f, button, link) {
   // Preflight a 2-byte ranged GET: a real download answers with bytes, whereas
   // a refusal answers JSON — so the user sees a message instead of a JSON page.
   button.disabled = true;
-  const url = streamUrl(f, '/api/download');
+  const url = mediaUrl(f, '/api/download', link);
+  setStatus('Preparing download\u2026');
   try {
     const probe = await fetch(url, { headers: { Range: 'bytes=0-1' } });
     const type = probe.headers.get('Content-Type') || '';
     if (probe.ok && !type.includes('application/json')) {
+      const name = dispositionName(probe.headers.get('Content-Disposition')) || f.name;
+      addHistory({ kind: 'downloaded', name: name, id: f.id, link: link || linkEl.value.trim(),
+                   is_video: !!f.is_video });
       window.location.href = url;  // Content-Disposition: attachment keeps the page
-      setStatus('Download started.');
+      setStatus('Download started: ' + name);
     } else {
       let msg = 'Download failed.';
       try { msg = (await probe.json()).error || msg; } catch (e) {}
@@ -840,6 +1203,8 @@ async function startDownload(f, button) {
   }
 }
 
+// --- Player ----------------------------------------------------------------
+
 let hls = null;
 let playAttempt = 0;
 
@@ -849,25 +1214,58 @@ function tearDownPlayer() {
   playerVideo.pause();
   playerVideo.removeAttribute('src');
   playerVideo.load();
+  seekEl.value = 0; seekEl.max = 0;
+  timeEl.textContent = '0:00 / 0:00';
+  playerTag.classList.add('hidden');
+  playerSpinner.style.display = 'none';
 }
 
-function streamUrl(f, endpoint) {
-  return endpoint + '?link=' + encodeURIComponent(linkEl.value.trim()) +
-         '&fs_id=' + encodeURIComponent(f.id) + '&t=' + Date.now();
+function showSpinner(on) { playerSpinner.style.display = on ? 'flex' : 'none'; }
+
+function setPlayingIcon() {
+  document.getElementById('btnPlay').innerHTML = playerVideo.paused ? '&#9654;' : '&#10074;&#10074;';
 }
 
-function playHls(f, attempt) {
-  const url = streamUrl(f, '/api/hls');
-  playerMsg.textContent = 'Direct playback unavailable — showing a 30-second preview.';
+async function openPlayer(f, link) {
+  const useLink = link || linkEl.value.trim();
+  tearDownPlayer();
+  const attempt = ++playAttempt;
+  playerTitle.textContent = f.name;
+  playerMsg.textContent = 'Preparing stream\u2026';
+  playerTag.textContent = 'Full length';
+  playerTag.classList.remove('hidden');
+  showSpinner(true);
+  player.classList.remove('hidden');
+  setPlayingIcon();
+  addHistory({ kind: 'played', name: f.name, id: f.id, link: useLink, is_video: true });
+
+  // Resolve the playlist first (behind the spinner); the helpers take several
+  // seconds to answer, and starting the video only afterwards keeps it from
+  // giving up while the stream is still being arranged.
+  let prep = null;
+  try {
+    const resp = await fetch(mediaUrl(f, '/api/prepare', useLink));
+    prep = await resp.json();
+  } catch (err) { /* fall through to playback attempt */ }
+  if (attempt !== playAttempt) return;
+  if (prep && !prep.ok) { playPreview(f, attempt, useLink, prep.error); return; }
+
+  playerMsg.textContent = '';
+  playStream(f, attempt, useLink);
+}
+
+function playStream(f, attempt, link) {
+  const url = mediaUrl(f, '/api/hls', link);
   if (window.Hls && window.Hls.isSupported()) {
-    if (hls) { hls.destroy(); }
+    if (hls) hls.destroy();
     hls = new window.Hls({ lowLatencyMode: false });
     hls.loadSource(url);
     hls.attachMedia(playerVideo);
-    hls.on(window.Hls.Events.MANIFEST_PARSED, () => playerVideo.play().catch(() => {}));
+    hls.on(window.Hls.Events.MANIFEST_PARSED, () => { playerVideo.play().catch(() => {}); });
     hls.on(window.Hls.Events.ERROR, (e, data) => {
       if (attempt !== playAttempt) return;
       if (data && data.fatal) {
+        showSpinner(false);
         playerMsg.textContent = 'This video could not be played. Try Download instead.';
       }
     });
@@ -877,30 +1275,12 @@ function playHls(f, attempt) {
   }
 }
 
-function openPlayer(f) {
-  tearDownPlayer();
-  const attempt = ++playAttempt;
-  playerTitle.textContent = f.name;
-  playerMsg.textContent = 'Loading...';
-  player.classList.remove('hidden');
-
-  // Try the direct MP4 first (fast, full quality); if the server cannot provide
-  // it, fall back to the HLS transcode, which always works anonymously.
-  playerVideo.addEventListener('error', function onErr() {
-    playerVideo.removeEventListener('error', onErr);
-    if (attempt !== playAttempt) return;
-    playHls(f, attempt);
-  });
-  playerVideo.addEventListener('loadeddata', function onData() {
-    if (attempt === playAttempt) playerMsg.textContent = '';
-  });
-  playerVideo.src = streamUrl(f, '/api/stream');
-  playerVideo.play().catch(() => {});
-  // Safety net: if nothing started shortly, switch to HLS.
-  setTimeout(() => {
-    if (attempt !== playAttempt) return;
-    if (playerVideo.readyState < 2) playHls(f, attempt);
-  }, 6000);
+function playPreview(f, attempt, link, reason) {
+  playerMsg.textContent = (reason ? reason + ' ' : '') +
+    'Showing TeraBox\u2019s 30-second preview.';
+  playerTag.textContent = 'Preview';
+  playerTag.classList.remove('hidden');
+  playStream(f, attempt, link);
 }
 
 function closePlayer() {
@@ -909,9 +1289,67 @@ function closePlayer() {
   playerMsg.textContent = '';
 }
 
+// video events -> UI
+playerVideo.addEventListener('loadeddata', () => { showSpinner(false); setPlayingIcon(); });
+playerVideo.addEventListener('waiting', () => showSpinner(true));
+playerVideo.addEventListener('playing', () => { showSpinner(false); setPlayingIcon(); });
+playerVideo.addEventListener('pause', setPlayingIcon);
+playerVideo.addEventListener('play', setPlayingIcon);
+playerVideo.addEventListener('ended', setPlayingIcon);
+playerVideo.addEventListener('timeupdate', () => {
+  if (!seekEl.dragging) seekEl.value = playerVideo.currentTime;
+  timeEl.textContent = fmtTime(playerVideo.currentTime) + ' / ' + fmtTime(playerVideo.duration);
+});
+playerVideo.addEventListener('loadedmetadata', () => {
+  seekEl.max = playerVideo.duration || 0;
+  timeEl.textContent = fmtTime(playerVideo.currentTime) + ' / ' + fmtTime(playerVideo.duration);
+});
+
+// controls
+seekEl.addEventListener('input', () => { seekEl.dragging = true; });
+seekEl.addEventListener('change', () => {
+  playerVideo.currentTime = Number(seekEl.value);
+  seekEl.dragging = false;
+});
+document.getElementById('btnPlay').addEventListener('click', () => {
+  if (playerVideo.paused) playerVideo.play().catch(() => {}); else playerVideo.pause();
+});
+document.getElementById('btnBack').addEventListener('click', () => {
+  playerVideo.currentTime = Math.max(0, playerVideo.currentTime - 10);
+});
+document.getElementById('btnFwd').addEventListener('click', () => {
+  playerVideo.currentTime = Math.min(playerVideo.duration || 0, playerVideo.currentTime + 10);
+});
+volEl.addEventListener('input', () => { playerVideo.volume = Number(volEl.value); playerVideo.muted = false; syncMute(); });
+document.getElementById('btnMute').addEventListener('click', () => {
+  playerVideo.muted = !playerVideo.muted;
+  syncMute();
+});
+function syncMute() {
+  document.getElementById('btnMute').innerHTML = playerVideo.muted ? '&#128263;' : '&#128266;';
+}
+rateEl.addEventListener('change', () => { playerVideo.playbackRate = Number(rateEl.value); });
+document.getElementById('btnFs').addEventListener('click', () => {
+  const box = player.querySelector('.box');
+  if (document.fullscreenElement) document.exitFullscreen();
+  else (box.requestFullscreen ? box.requestFullscreen() : playerVideo.webkitEnterFullscreen?.());
+});
 document.getElementById('playerClose').addEventListener('click', closePlayer);
 player.addEventListener('click', e => { if (e.target === player) closePlayer(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closePlayer(); });
+
+document.addEventListener('keydown', e => {
+  if (player.classList.contains('hidden')) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'Escape') closePlayer();
+  else if (e.key === ' ' || e.key === 'k') { e.preventDefault();
+    if (playerVideo.paused) playerVideo.play().catch(() => {}); else playerVideo.pause(); }
+  else if (e.key === 'ArrowLeft') playerVideo.currentTime = Math.max(0, playerVideo.currentTime - 10);
+  else if (e.key === 'ArrowRight') playerVideo.currentTime = Math.min(playerVideo.duration || 0, playerVideo.currentTime + 10);
+  else if (e.key === 'm') playerVideo.muted = !playerVideo.muted;
+  else if (e.key === 'f') document.getElementById('btnFs').click();
+});
+
+// --- Fetch ----------------------------------------------------------------
 
 async function fetchFiles() {
   const link = linkEl.value.trim();
@@ -946,6 +1384,12 @@ clearBtn.addEventListener('click', () => {
   setStatus('');
   linkEl.focus();
 });
+histClearBtn.addEventListener('click', () => {
+  saveHistory([]);
+  renderHistory();
+});
+
+renderHistory();
 </script>
 </body>
 </html>

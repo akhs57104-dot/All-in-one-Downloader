@@ -28,12 +28,21 @@ Getting the bytes:
 
 1. **TeraBox direct** — `GET /api/sharedownload` mints a short-lived `dlink`,
    which is streamed through this server. This needs a signed-in cookie (see
-   below); without one TeraBox answers `403 "user not exists"`.
-2. **Helper service** — with no cookie, the app asks a third-party resolver
-   (iteraplay.com) that holds its own TeraBox account. It returns the original
-   file at full quality with `Range` support, so download and playback both
-   work. It is rate-limited (a few files per six hours for an anonymous caller)
-   and it sees every link you paste, so it is a fallback, not the default.
+   below) and is the only route that returns TeraBox's original MP4; without a
+   cookie TeraBox answers `403 "user not exists"`, so it is skipped.
+2. **Helper services** — with no cookie, the app asks third-party resolvers that
+   hold their own TeraBox accounts. `playterabox.com` is tried first: it returns
+   a full-length, `Range`-capable link plus a complete HLS playlist (hundreds of
+   segments), so both download and full-length playback work and there is no
+   quota. `iteraplay.com` is a secondary source, but it is rate-limited (a few
+   files per six hours for an anonymous caller). Both see every link you paste,
+   so they are a fallback, not the default.
+
+   TeraBox never hands an anonymous visitor the original file, so a helper's copy
+   is a transcoded MPEG-TS stream. Playback is unaffected (HLS carries the
+   original duration), but a download arrives as `.ts`, not `.mp4`. Remux it to
+   MP4 with `ffmpeg -i file.ts -c copy file.mp4`, or set `TERABOX_COOKIE` to
+   download the original MP4 directly.
 3. **TeraBox preview** — TeraBox's own `/share/streaming` returns an anonymous
    HLS transcode, but only a fixed 30-second window, so it is used only to give
    a short preview when neither of the above can serve the file.
