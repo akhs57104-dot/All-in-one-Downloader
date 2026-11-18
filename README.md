@@ -38,6 +38,11 @@ platform is also picked automatically once a link resolves. The flow is:
 3. `GET /api/social/download` saves the chosen quality as a file, merging video
    and audio with `ffmpeg` when the site only offers them separately.
 
+Every saved file carries the developer branding in its name -
+`<title> - Powered by Tech Arslan Software Solutions.<ext>` - so a download is
+recognisable after it leaves the page. The same name is shown in the history
+list, and the TeraBox tab uses it too.
+
 Session-bound sites (TikTok signs its media URLs against the extractor's own
 cookies) work because the cookies yt-dlp collected are threaded from extraction
 through to the stream and download requests.

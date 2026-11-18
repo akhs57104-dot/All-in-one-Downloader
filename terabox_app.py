@@ -569,6 +569,19 @@ def api_resolve():
     except Exception as exc:  # noqa: BLE001 - surfaced to the UI
         return jsonify({"ok": False, "error": f"Unexpected error: {exc}"}), 500
 
+BRAND_SUFFIX = "Powered by Tech Arslan Software Solutions"
+
+
+def _branded(filename: str) -> str:
+    """Append the developer branding to a download's name, keeping the extension."""
+    if BRAND_SUFFIX in filename:
+        return filename
+    stem, dot, ext = filename.rpartition(".")
+    if dot and stem and len(ext) <= 5 and ext.isalnum():
+        return f"{stem} - {BRAND_SUFFIX}.{ext}"
+    return f"{filename} - {BRAND_SUFFIX}"
+
+
 def _proxy_stream(upstream, *, as_attachment: bool, filename: str,
                   content_type: str | None = None) -> Response:
     """Relay an upstream response, preserving Range/length semantics."""
@@ -578,7 +591,7 @@ def _proxy_stream(upstream, *, as_attachment: bool, filename: str,
         "Accept-Ranges": "bytes",
     }
     if as_attachment:
-        quoted = urllib.parse.quote(filename)
+        quoted = urllib.parse.quote(_branded(filename))
         headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quoted}"
     for name in ("Content-Length", "Content-Range"):
         if upstream.headers.get(name):
@@ -1733,6 +1746,7 @@ def api_social_download():
             raise SocialError(_friendly_download_error(exc)) from exc
 
         filename = f"{safe}.mp4"
+        branded = _branded(filename)
 
         def stream_and_cleanup():
             try:
@@ -1749,7 +1763,7 @@ def api_social_download():
         return Response(stream_and_cleanup(), headers={
             "Content-Type": "video/mp4",
             "Content-Length": str(size),
-            "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(filename)}",
+            "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(branded)}",
         })
     except SocialError as exc:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -2466,6 +2480,7 @@ INDEX_HTML = """<!doctype html>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 <script>
 const ICON_PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+const BRAND_SUFFIX = 'Powered by Tech Arslan Software Solutions';
 const ICON_PAUSE = '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
 const ICON_VOL = '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>';
 const ICON_MUTE = '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm15.5-1.5-1.4-1.4L15.7 8.5l-2.4-2.4-1.4 1.4 2.4 2.4-2.4 2.4 1.4 1.4 2.4-2.4 2.4 2.4 1.4-1.4-2.4-2.4z"/></svg>';
@@ -2650,6 +2665,12 @@ function dispositionName(header){
   if (star) { try { return decodeURIComponent(star[1]); } catch (e) { return star[1]; } }
   const plain = /filename="?([^";]+)"?/i.exec(header);
   return plain ? plain[1] : '';
+}
+function brandName(name){
+  if (!name || name.indexOf(BRAND_SUFFIX) >= 0) return name;
+  const dot = name.lastIndexOf('.');
+  if (dot > 0 && name.length - dot <= 6) return name.slice(0, dot) + ' - ' + BRAND_SUFFIX + name.slice(dot);
+  return name + ' - ' + BRAND_SUFFIX;
 }
 function copyText(text, msg){
   if (!text) { toast('Nothing to copy'); return; }
@@ -3377,7 +3398,7 @@ async function socialDownload(media, f, button){
     frame.src = url;
     document.body.appendChild(frame);
     setTimeout(() => frame.remove(), 120000);
-    addHistory({ kind: 'downloaded', name: media.title, id: f.format_id, link: media.url,
+    addHistory({ kind: 'downloaded', name: brandName(media.title), id: f.format_id, link: media.url,
       is_video: true, source: 'social', playable: !!f.playable,
       progressive: !!f.progressive, tag: f.label });
     setTimeout(() => sSetStatus('Download started. If nothing happened, the source refused it.'), 2500);
