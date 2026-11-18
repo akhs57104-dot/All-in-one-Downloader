@@ -40,13 +40,20 @@ Fly.io, Heroku and similar.
 
 ## Free hosting that stays up
 
-Two hosts give a permanent public URL with no payment. Both build the bundled
+Free hosting splits into two groups: hosts that want a card on file even on the
+free plan (Northflank), and hosts that do not (Render). Both build the bundled
 `Dockerfile`, so `ffmpeg` comes along.
 
-### Northflank - free, always on, no card
+**If you have no card, use Render.** It is the only option here that both stays
+free and asks for no payment details.
 
-Northflank's Developer Sandbox is free, needs **no card**, and its pricing page
-lists "Always on, no sleeping". It allows 2 services.
+### Northflank - free plan, but a card is required
+
+Northflank's Developer Sandbox is free in usage (2 services, "Always on, no
+sleeping"), but its billing docs state plainly that *"all users must add a
+payment method to start creating resources on Northflank, regardless of plan
+selection. This is to verify user identity."* The card is not charged while you
+stay inside the sandbox, but you cannot deploy without entering one.
 
 1. Sign up at <https://app.northflank.com/signup>.
 2. **Create** → **Service** → **Combined**.

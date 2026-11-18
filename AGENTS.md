@@ -187,9 +187,10 @@ Other traps:
   `fly.toml` (Dockerfile, `/healthz` check, 1 GB) deploy the same repo, and
   `Procfile` covers Heroku-style hosts. All three point at `bash ./start.sh`.
 - **Free hosting, verified against the providers' own docs.** Northflank's
-  Developer Sandbox is free, needs no card, and its pricing page says "Always
-  on, no sleeping"; a combined service built from the Dockerfile gets a stable
-  `*.code.run` URL. Render's Free plan grants 750 instance hours a month, and
+  Developer Sandbox is free *in usage* and its pricing page says "Always on, no
+  sleeping", but its billing docs require a payment method for every user
+  before any resource can be created, so a card is unavoidable there. Render's
+  Free plan is the one that needs no payment details at all. Render's Free plan grants 750 instance hours a month, and
   the longest month is 744 hours, so one always-on service fits - but it spins
   down after 15 minutes idle, so pair it with a free UptimeRobot check on
   `/healthz` every 5 minutes. Fly.io and Railway are *not* free any more:
