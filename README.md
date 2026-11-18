@@ -74,6 +74,25 @@ the service awake and counts as the inbound traffic Render requires.
 Without the pinger the URL still works, but the first request after an idle
 spell waits about a minute while the service spins back up.
 
+### Why not Vercel or Netlify
+
+Both are built for short, stateless requests, and this app is the opposite, so
+neither can host it well:
+
+- **Vercel** - a Vercel Function may run for at most 300 s on Hobby and answers
+  with a 4.5 MB body cap (streaming excepted). There is no long-lived process, so
+  the in-memory HLS playlists and TeraBox helper cache this app relies on are
+  gone between requests. Its Container runtime accepts a Dockerfile, but the
+  same function limits still apply. On top of that, the Vercel Terms of Service
+  restrict the Hobby plan to "personal or non-commercial use", and forbid
+  making the Services available to a third party - so a paid customer cannot be
+  served from a free Hobby project.
+- **Netlify** - no Dockerfile or container support at all. Serverless Functions
+  stop at 60 s synchronous and 15 minutes background, and there is no bundled
+  `ffmpeg` or persistent process.
+
+A long-running download server needs the Northflank or Render setup above.
+
 ### One-click on a host you already have an account for
 
 Every one of these builds the bundled `Dockerfile`, so `ffmpeg` comes along and

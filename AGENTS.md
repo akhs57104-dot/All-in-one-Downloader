@@ -196,6 +196,13 @@ Other traps:
   Fly gives $1 of credit for 7 days, Railway needs a card. Hugging Face moved
   Docker Spaces behind a paid plan (only Static Spaces stayed free), and Koyeb's
   free tier is only 5 hours a month - both are traps, do not recommend them.
+- **Vercel and Netlify cannot host this app.** Vercel Functions cap at 300 s on
+  Hobby with a 4.5 MB body limit and no long-lived process, so the in-memory HLS
+  playlists and TeraBox helper cache break; its Container runtime takes a
+  Dockerfile but keeps the function limits, and the Terms of Service limit Hobby
+  to "personal or non-commercial use" and forbid serving third parties. Netlify
+  has no Dockerfile/container support at all and caps functions at 60 s
+  synchronous. Do not offer either as a host.
 - **No managed host can be deployed from here.** Railway fails at runtime with
   no logs, and Fly.io, Render, Koyeb and Heroku all need an interactive login
   or an API token that this environment does not have (the browser has no
