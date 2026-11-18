@@ -38,6 +38,42 @@ Managed hosts: `Dockerfile`, `Procfile`, `railway.json`, `railpack.json`,
 `nixpacks.toml`, `render.yaml` and `fly.toml` are ready for Railway, Render,
 Fly.io, Heroku and similar.
 
+## Free hosting that stays up
+
+Two hosts give a permanent public URL with no payment. Both build the bundled
+`Dockerfile`, so `ffmpeg` comes along.
+
+### Northflank - free, always on, no card
+
+Northflank's Developer Sandbox is free, needs **no card**, and its pricing page
+lists "Always on, no sleeping". It allows 2 services.
+
+1. Sign up at <https://app.northflank.com/signup>.
+2. **Create** → **Service** → **Combined**.
+3. Name it, then under **Repository** connect GitHub and pick
+   `All-in-one-Downloader`, branch `main`.
+4. **Build options** → **Dockerfile** (leave the paths at the defaults).
+5. **Networking** → keep the detected port `12000`, set it **public**.
+6. **Create service**. The first build takes a few minutes; the service header
+   then shows a public `*.code.run` URL that does not change.
+
+### Render - free, no card, kept awake
+
+Render's Free plan gives **750 instance hours per month**, and the longest month
+is 744 hours, so a single always-on service fits inside the free allowance. A
+Free web service still *spins down after 15 minutes without traffic*, and a
+spun-down service serves a slow loading page on the next visit. A free uptime
+pinger removes that: it requests `/healthz` every 5 minutes, which both keeps
+the service awake and counts as the inbound traffic Render requires.
+
+1. Deploy: <https://render.com/deploy?repo=https://github.com/akhs57104-dot/All-in-one-Downloader>
+   (Render reads `render.yaml`, picks Docker, health-checks `/healthz`).
+2. Create a free monitor at <https://uptimerobot.com> pointing at your
+   `https://<name>.onrender.com/healthz`, interval 5 minutes.
+
+Without the pinger the URL still works, but the first request after an idle
+spell waits about a minute while the service spins back up.
+
 ### One-click on a host you already have an account for
 
 Every one of these builds the bundled `Dockerfile`, so `ffmpeg` comes along and

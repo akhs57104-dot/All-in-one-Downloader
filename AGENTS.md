@@ -186,6 +186,16 @@ Other traps:
 - **Alternative platforms are wired up.** `render.yaml` (Docker runtime) and
   `fly.toml` (Dockerfile, `/healthz` check, 1 GB) deploy the same repo, and
   `Procfile` covers Heroku-style hosts. All three point at `bash ./start.sh`.
+- **Free hosting, verified against the providers' own docs.** Northflank's
+  Developer Sandbox is free, needs no card, and its pricing page says "Always
+  on, no sleeping"; a combined service built from the Dockerfile gets a stable
+  `*.code.run` URL. Render's Free plan grants 750 instance hours a month, and
+  the longest month is 744 hours, so one always-on service fits - but it spins
+  down after 15 minutes idle, so pair it with a free UptimeRobot check on
+  `/healthz` every 5 minutes. Fly.io and Railway are *not* free any more:
+  Fly gives $1 of credit for 7 days, Railway needs a card. Hugging Face moved
+  Docker Spaces behind a paid plan (only Static Spaces stayed free), and Koyeb's
+  free tier is only 5 hours a month - both are traps, do not recommend them.
 - **No managed host can be deployed from here.** Railway fails at runtime with
   no logs, and Fly.io, Render, Koyeb and Heroku all need an interactive login
   or an API token that this environment does not have (the browser has no
