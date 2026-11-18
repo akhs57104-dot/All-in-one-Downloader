@@ -5,3 +5,8 @@
 # "python: command not found".
 [phases.setup]
 aptPkgs = ["ffmpeg"]
+
+# Run through bash so a missing exec bit cannot fail the start with
+# "permission denied".
+[start]
+cmd = "bash ./start.sh"

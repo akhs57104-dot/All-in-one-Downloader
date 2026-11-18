@@ -3,6 +3,7 @@
   "provider": "python",
   "buildAptPackages": ["...", "ffmpeg"],
   "deploy": {
-    "aptPackages": ["...", "ffmpeg"]
+    "aptPackages": ["...", "ffmpeg"],
+    "startCommand": "bash ./start.sh"
   }
 }

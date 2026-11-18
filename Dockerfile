@@ -25,7 +25,8 @@ USER appuser
 ENV HOME=/home/appuser
 
 EXPOSE 12000
-# One worker with threads: the app keeps token state in process memory.
-# start.sh binds to $PORT (falling back to 12000) and only passes
-# --no-control-socket when the installed gunicorn supports it.
-CMD ["./start.sh"]
+# start.sh binds to $PORT (falling back to 12000), picks a dual-stack or IPv4
+# listen address, and only passes --no-control-socket when the installed
+# gunicorn supports it. Run it through bash so a missing exec bit cannot turn
+# into "permission denied" at boot.
+CMD ["bash", "./start.sh"]
