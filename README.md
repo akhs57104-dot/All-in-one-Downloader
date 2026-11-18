@@ -22,6 +22,32 @@ Set `PORT` to change the port. `ffmpeg` on `PATH` is recommended: it lets yt-dlp
 merge separate video and audio tracks for the highest qualities. Without it, only
 single-file (progressive) streams are offered.
 
+## Deploy
+
+The app keeps short-lived state in process memory - resolved HLS playlists and
+the TeraBox helper cache - so run **one worker with threads**, not multiple
+processes. `wsgi.py` is the WSGI entry point.
+
+Keep it running on any Linux box (auto-restarts if gunicorn ever exits):
+
+```bash
+PORT=12000 nohup ./run.sh > /tmp/techarslan.out 2>&1 &
+```
+
+Managed hosts: `Procfile` and `render.yaml` are ready for Render, Railway,
+Heroku and similar. Connect the repository and the platform runs
+`gunicorn --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:$PORT wsgi:app`.
+
+Docker (bundles `ffmpeg`):
+
+```bash
+docker build -t techarslan .
+docker run -d --restart unless-stopped -p 12000:12000 techarslan
+```
+
+The `--timeout 300` matters: merging a long video with `ffmpeg` can take longer
+than a default request timeout.
+
 ## Social Downloader
 
 Backed by [yt-dlp](https://github.com/yt-dlp/yt-dlp). The home page lists every
