@@ -36,6 +36,7 @@ behind it, tried in order:
 Run:  python3 terabox_app.py   (serves on PORT, default 12000)
 """
 
+import functools
 import hashlib
 import json
 import os
@@ -1205,14 +1206,41 @@ def _ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
-# The android client is the one YouTube still answers without a signed-in
-# cookie from a datacenter IP; the others are tried in turn for the rest of the
-# sites, where the choice does not matter.
-_YT_CLIENTS = ("android", "ios", "web", "tv_embedded")
+# yt-dlp picks its own YouTube player clients. Pinning them here used to cut
+# the format list down hard (a pinned android/ios/web/tv_embedded set returned
+# 1 format where the default returns 24+), so the list is left to yt-dlp.
+_YT_IMPERSONATE = "chrome"
+
+
+@functools.lru_cache(maxsize=1)
+def _impersonate_target():
+    """A curl_cffi impersonation target, or None when it is unavailable.
+
+    yt-dlp wants an `ImpersonateTarget` instance here, not a bare string; a
+    string trips an assertion inside yt-dlp. curl_cffi ships with the app, so
+    this normally succeeds and gives every extractor a real Chrome TLS
+    fingerprint, which is what unblocks the bot-checked sites. Cached: probing
+    the handlers means building a YoutubeDL, which is too costly per request.
+    """
+    try:
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+    except ImportError:
+        return None
+    target = ImpersonateTarget(_YT_IMPERSONATE)
+    try:
+        import yt_dlp
+
+        with yt_dlp.YoutubeDL({"quiet": True}) as probe:
+            for handler in probe._request_director.handlers.values():
+                if hasattr(handler, "is_supported_target") and handler.is_supported_target(target):
+                    return target
+    except Exception:  # noqa: BLE001 - impersonation is a best-effort upgrade
+        return None
+    return None
 
 
 def _base_ydl_opts(*, quiet: bool = True) -> dict:
-    return {
+    opts = {
         "quiet": quiet,
         "no_warnings": quiet,
         "noplaylist": True,
@@ -1222,8 +1250,11 @@ def _base_ydl_opts(*, quiet: bool = True) -> dict:
         "socket_timeout": 30,
         "retries": 2,
         "http_headers": {"User-Agent": BROWSER_UA},
-        "extractor_args": {"youtube": {"player_client": list(_YT_CLIENTS)}},
     }
+    target = _impersonate_target()
+    if target is not None:
+        opts["impersonate"] = target
+    return opts
 
 
 def _cookie_file() -> str:
@@ -1247,6 +1278,16 @@ def _cookie_file() -> str:
         return ""
 
 
+def _run_extract(url: str, opts: dict):
+    """One yt-dlp run. Returns `(info, cookies)`."""
+    import yt_dlp
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        cookies = {c.name: c.value for c in ydl.cookiejar}
+    return info, cookies
+
+
 def _extract_info(url: str) -> tuple:
     """Run yt-dlp on a URL. Returns `(info, cookies)`.
 
@@ -1254,27 +1295,43 @@ def _extract_info(url: str) -> tuple:
     yt-dlp collected while extracting, so the cookies must travel with the URL
     when it is fetched later.
     """
-    import yt_dlp
-
     opts = _base_ydl_opts()
     cookie = _cookie_file()
     if cookie:
         opts["cookiefile"] = cookie
     # Extraction occasionally fails transiently (an empty format list from a CDN
     # hiccup), so one quick retry turns a user-visible error into a success.
+    last_exc = None
     for attempt in range(2):
         try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                cookies = {c.name: c.value for c in ydl.cookiejar}
+            info, cookies = _run_extract(url, opts)
             break
         except Exception as exc:  # noqa: BLE001 - message is shown to the user
+            last_exc = exc
             if attempt == 0 and _is_transient(exc):
                 time.sleep(1.5)
                 continue
-            raise SocialError(_friendly_download_error(exc)) from exc
-    else:
+            break
+    else:  # pragma: no cover - the loop always breaks
         raise SocialError("That link could not be read; please try again.")
+
+    if last_exc is not None:
+        # No dedicated extractor matched. The generic extractor still finds
+        # media embedded in the page (og:video, <video src>, players), which is
+        # what makes Threads/LinkedIn-style links work at all.
+        if "unsupported url" in str(last_exc).lower():
+            generic = dict(opts, force_generic_extractor=True)
+            try:
+                info, cookies = _run_extract(url, generic)
+                last_exc = None
+            except Exception:  # noqa: BLE001 - fall through to the friendly error
+                pass
+        if last_exc is not None:
+            raise SocialError(_friendly_download_error(last_exc)) from last_exc
+
+    if not isinstance(info, dict):
+        # Telegram (and a few others) can return None instead of raising.
+        raise SocialError("That link has no playable media.")
     if info.get("_type") == "playlist":
         entries = [e for e in (info.get("entries") or []) if e]
         if not entries:
@@ -1296,12 +1353,18 @@ def _friendly_download_error(exc: Exception) -> str:
     text = str(exc)
     low = text.lower()
     if "sign in" in low or "bot" in low or "cookies" in low:
-        return ("This site wants a signed-in session. Add cookies via the "
+        return ("This site wants a signed-in session. Instagram, Facebook, "
+                "Reddit and Vimeo often do. Add a cookies.txt via the "
                 "SOCIAL_COOKIES setting and try again.")
     if "private" in low or "login" in low or "authentication" in low:
         return "This post is private, so it cannot be fetched without an account."
     if "unsupported url" in low:
         return "That link is not from a supported site."
+    if "no video could be found" in low:
+        # X/Twitter serves video only to a logged-in session.
+        return ("No video was found in that post. On X/Twitter this usually "
+                "means the post has no video, or that X wants a signed-in "
+                "session - add cookies via SOCIAL_COOKIES for those.")
     if "no video" in low or "no media" in low or "no formats" in low:
         return "No downloadable video or audio was found at that link."
     if "not available" in low or "removed" in low or "deleted" in low:
