@@ -41,6 +41,10 @@ import json
 import os
 import re
 import secrets
+import shutil
+import subprocess
+import tempfile
+import threading
 import time
 import urllib.parse
 
@@ -839,6 +843,704 @@ def api_hls():
                   mode="hls")
 
 # ---------------------------------------------------------------------------
+# Social media downloader (YouTube, Instagram, Facebook, TikTok, X, ...)
+#
+# yt-dlp does the extracting. It returns a list of formats; some are
+# "progressive" (video+audio in one file) and can be streamed straight to the
+# browser, while others are video-only or audio-only and must be merged first.
+# Merging needs ffmpeg and takes time, so it happens on demand: the page lists
+# the formats, and only when the user asks for one does the server download the
+# pieces, mux them, and hand back the finished file.
+# ---------------------------------------------------------------------------
+
+# Each entry: key, display name, brand colour, and a host matcher.
+SOCIAL_PLATFORMS = (
+    ("youtube",   "YouTube",    "#ff0033", ("youtube.com", "youtu.be", "youtube-nocookie.com")),
+    ("instagram", "Instagram",  "#e1306c", ("instagram.com", "instagr.am")),
+    ("facebook",  "Facebook",   "#1877f2", ("facebook.com", "fb.watch", "fb.com")),
+    ("tiktok",    "TikTok",     "#00f2ea", ("tiktok.com",)),
+    ("twitter",   "X (Twitter)","#e7e9ea", ("twitter.com", "x.com", "t.co")),
+    ("whatsapp",  "WhatsApp",   "#25d366", ("whatsapp.com", "wa.me")),
+    ("snapchat",  "Snapchat",   "#fffc00", ("snapchat.com",)),
+    ("linkedin",  "LinkedIn",   "#0a66c2", ("linkedin.com", "lnkd.in")),
+    ("pinterest", "Pinterest",  "#e60023", ("pinterest.com", "pin.it")),
+    ("reddit",    "Reddit",     "#ff4500", ("reddit.com", "redd.it")),
+    ("threads",   "Threads",    "#e7e9ea", ("threads.net", "threads.com")),
+    ("telegram",  "Telegram",   "#2aabee", ("t.me", "telegram.me", "telegram.org")),
+    ("vimeo",     "Vimeo",      "#1ab7ea", ("vimeo.com",)),
+    ("dailymotion","Dailymotion","#00aaff", ("dailymotion.com", "dai.ly")),
+    ("twitch",    "Twitch",     "#9146ff", ("twitch.tv",)),
+    ("tumblr",    "Tumblr",     "#36465d", ("tumblr.com",)),
+    ("soundcloud","SoundCloud", "#ff5500", ("soundcloud.com",)),
+    ("bilibili",  "Bilibili",   "#fb7299", ("bilibili.com", "b23.tv")),
+    ("rumble",    "Rumble",     "#85c742", ("rumble.com",)),
+    ("odysee",    "Odysee",     "#ef1970", ("odysee.com", "lbry.tv")),
+    ("streamable","Streamable", "#0f90fa", ("streamable.com",)),
+    ("imgur",     "Imgur",      "#1bb76e", ("imgur.com",)),
+    ("likee",     "Likee",      "#ff0050", ("likee.video",)),
+    ("kwai",      "Kwai",       "#ff5000", ("kwai.com", "kwai-video.com")),
+    ("triller",   "Triller",    "#ff2b2b", ("triller.co",)),
+    ("coub",      "Coub",       "#f56c2d", ("coub.com",)),
+    ("mixcloud",  "Mixcloud",   "#5000ff", ("mixcloud.com",)),
+    ("bandcamp",  "Bandcamp",   "#629aa9", ("bandcamp.com",)),
+    ("9gag",      "9GAG",       "#000000", ("9gag.com",)),
+    ("other",     "Other link", "#8b93a7", ()),
+)
+
+_SOCIAL_BY_KEY = {p[0]: p for p in SOCIAL_PLATFORMS}
+
+
+def _host_matches(host: str, roots) -> bool:
+    host = (host or "").lower().lstrip(".")
+    return any(host == r or host.endswith("." + r) for r in roots)
+
+
+def detect_platform(url: str) -> str:
+    """Return the platform key for a URL, or 'other'."""
+    host = urllib.parse.urlparse(url).hostname or ""
+    for key, _name, _color, roots in SOCIAL_PLATFORMS:
+        if roots and _host_matches(host, roots):
+            return key
+    return "other"
+
+
+def social_platform_list() -> list:
+    return [{"key": k, "name": n, "color": c} for k, n, c, _r in SOCIAL_PLATFORMS]
+
+
+def _ytdlp_available() -> bool:
+    try:
+        import yt_dlp  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None
+
+
+# The android client is the one YouTube still answers without a signed-in
+# cookie from a datacenter IP; the others are tried in turn for the rest of the
+# sites, where the choice does not matter.
+_YT_CLIENTS = ("android", "ios", "web", "tv_embedded")
+
+
+def _base_ydl_opts(*, quiet: bool = True) -> dict:
+    return {
+        "quiet": quiet,
+        "no_warnings": quiet,
+        "noplaylist": True,
+        "nocheckcertificate": True,
+        "extract_flat": False,
+        "skip_download": True,
+        "socket_timeout": 30,
+        "retries": 2,
+        "http_headers": {"User-Agent": BROWSER_UA},
+        "extractor_args": {"youtube": {"player_client": list(_YT_CLIENTS)}},
+    }
+
+
+def _cookie_file() -> str:
+    """Write any configured cookies to a temp file and return its path.
+
+    Sites like Instagram and Facebook often refuse anonymous requests. A user
+    can drop a Netscape cookies.txt in via SOCIAL_COOKIES and the extractor
+    picks it up. Empty means none are configured.
+    """
+    raw = os.environ.get("SOCIAL_COOKIES", "").strip()
+    if not raw:
+        return ""
+    if os.path.exists(raw):
+        return raw
+    path = os.path.join(tempfile.gettempdir(), "social_cookies.txt")
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(raw.replace("\\n", "\n"))
+        return path
+    except OSError:
+        return ""
+
+
+def _extract_info(url: str) -> tuple:
+    """Run yt-dlp on a URL. Returns `(info, cookies)`.
+
+    Some sites (TikTok) sign the media URL against the session cookies that
+    yt-dlp collected while extracting, so the cookies must travel with the URL
+    when it is fetched later.
+    """
+    import yt_dlp
+
+    opts = _base_ydl_opts()
+    cookie = _cookie_file()
+    if cookie:
+        opts["cookiefile"] = cookie
+    # Extraction occasionally fails transiently (an empty format list from a CDN
+    # hiccup), so one quick retry turns a user-visible error into a success.
+    for attempt in range(2):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                cookies = {c.name: c.value for c in ydl.cookiejar}
+            break
+        except Exception as exc:  # noqa: BLE001 - message is shown to the user
+            if attempt == 0 and _is_transient(exc):
+                time.sleep(1.5)
+                continue
+            raise SocialError(_friendly_download_error(exc)) from exc
+    else:
+        raise SocialError("That link could not be read; please try again.")
+    if info.get("_type") == "playlist":
+        entries = [e for e in (info.get("entries") or []) if e]
+        if not entries:
+            raise SocialError("That link has no playable media.")
+        info = entries[0]
+    return info, cookies
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Whether a failed extraction is worth one immediate retry."""
+    text = str(exc).lower()
+    markers = ("no video formats found", "unable to extract", "temporarily",
+               "timed out", "connection reset", "empty response", "http error 5")
+    return any(m in text for m in markers)
+
+
+def _friendly_download_error(exc: Exception) -> str:
+    """Turn a yt-dlp failure into something a user can act on."""
+    text = str(exc)
+    low = text.lower()
+    if "sign in" in low or "bot" in low or "cookies" in low:
+        return ("This site wants a signed-in session. Add cookies via the "
+                "SOCIAL_COOKIES setting and try again.")
+    if "private" in low or "login" in low or "authentication" in low:
+        return "This post is private, so it cannot be fetched without an account."
+    if "unsupported url" in low:
+        return "That link is not from a supported site."
+    if "no video" in low or "no media" in low or "no formats" in low:
+        return "No downloadable video or audio was found at that link."
+    if "not available" in low or "removed" in low or "deleted" in low:
+        return "That post is unavailable; it may have been removed."
+    if "timed out" in low or "timeout" in low:
+        return "The site took too long to answer. Please try again."
+    # Strip yt-dlp's "ERROR: " prefix and any extractor tag for readability.
+    clean = re.sub(r"^ERROR:\s*", "", text)
+    return clean[:300]
+
+
+class SocialError(Exception):
+    """Raised with a message that is safe to show to the user."""
+
+
+def _pick_thumbnail(info: dict) -> str:
+    thumb = info.get("thumbnail")
+    if thumb:
+        return thumb
+    thumbs = info.get("thumbnails") or []
+    for t in reversed(thumbs):
+        if t.get("url"):
+            return t["url"]
+    return ""
+
+
+def _label_format(f: dict, short: int | None) -> str:
+    """A short human label such as '720p MP4' or 'Audio MP3'."""
+    ext = (f.get("ext") or "").upper()
+    if f.get("vcodec") == "none":
+        abr = f.get("abr")
+        return f"Audio {ext}" + (f" {int(abr)}kbps" if abr else "")
+    if short:
+        label = f"{short}p"
+    else:
+        # Some sites name their tiers instead of giving a height (Facebook's
+        # "sd" and "hd"), so fall back to that name.
+        label = (f.get("format_note") or f.get("format_id") or "Video")
+        label = str(label).upper() if len(str(label)) <= 4 else str(label).title()
+    fps = f.get("fps")
+    if fps and fps >= 50:
+        label += f" {int(fps)}fps"
+    return f"{label} {ext}".strip()
+
+
+def _sort_formats(formats: list) -> list:
+    """Progressive first (they play immediately), then by quality, best last."""
+    def key(f):
+        return (1 if f["progressive"] else 0,
+                1 if f["audio_only"] else 0,
+                f.get("height") or 0,
+                f.get("abr") or 0)
+    return sorted(formats, key=key)
+
+
+def social_extract(url: str) -> dict:
+    """Resolve a social URL into metadata plus a list of offered formats."""
+    if not _ytdlp_available():
+        raise SocialError("The downloader engine (yt-dlp) is not installed on "
+                          "the server.")
+    info, cookies = _extract_info(url)
+
+    raw = [f for f in (info.get("formats") or []) if f.get("url")]
+    if not raw and info.get("url"):
+        raw = [info]
+
+    formats = []
+    for f in raw:
+        if (f.get("ext") or "") in ("mhtml", "storyboard"):
+            continue
+        vcodec, acodec = f.get("vcodec"), f.get("acodec")
+        # A codec of the string "none" means that half is missing; an absent
+        # codec (None) means the extractor did not say, which still counts as
+        # present - Facebook reports its progressive MP4s that way.
+        has_video = vcodec != "none"
+        has_audio = acodec != "none"
+        if not has_video and not has_audio:
+            continue
+        if (f.get("protocol") or "") == "mhtml":
+            continue
+
+        width, height = f.get("width"), f.get("height")
+        # Quality is the short side: for portrait clips the height is the long
+        # side, so 540p would otherwise read as 1024p.
+        short = min(width, height) if (width and height) else (height or width)
+        progressive = has_video and has_audio
+        is_audio = not has_video
+        size = f.get("filesize") or f.get("filesize_approx")
+        resolution = f"{width}x{height}" if (width and height) else ""
+        formats.append({
+            "format_id": str(f.get("format_id")),
+            "label": _label_format(f, short),
+            "ext": f.get("ext") or "",
+            "height": short,
+            "resolution": resolution,
+            "fps": f.get("fps"),
+            "abr": f.get("abr"),
+            "size": size,
+            "progressive": progressive,
+            "audio_only": is_audio,
+            "kind": "audio" if is_audio else "video",
+            "playable": progressive,
+        })
+
+    if not formats:
+        raise SocialError("No downloadable video or audio was found at that link.")
+
+    formats = _sort_formats(formats)
+    # One entry per distinct quality, preferring a progressive file when both a
+    # progressive and a merged-only version exist for the same quality.
+    best_by_quality: dict = {}
+    for f in formats:
+        # Height is None on sites that name their tiers (Facebook's sd/hd), so
+        # fall back to the label there to keep those tiers apart.
+        quality = f["height"] if f["height"] else f["label"]
+        key = (f["kind"], quality, round(f["abr"] or 0, -1))
+        current = best_by_quality.get(key)
+        if current is None or (f["progressive"] and not current["progressive"]):
+            best_by_quality[key] = f
+    deduped = _sort_formats(list(best_by_quality.values()))
+
+    # Best of each kind. The list is sorted worst-first, so the last match wins.
+    best_progressive = next((f for f in reversed(deduped) if f["progressive"]), None)
+    best_video = next((f for f in reversed(deduped) if f["kind"] == "video"), None)
+    best_audio = next((f for f in reversed(deduped) if f["kind"] == "audio"), None)
+
+    default = best_progressive or best_video or deduped[-1]
+
+    return {
+        "url": url,
+        "platform": detect_platform(url),
+        "title": info.get("title") or "Untitled",
+        "uploader": info.get("uploader") or info.get("channel") or info.get("uploader_id") or "",
+        "duration": info.get("duration"),
+        "duration_text": _duration_text(info.get("duration")),
+        "thumbnail": _pick_thumbnail(info),
+        "is_live": bool(info.get("is_live")),
+        "formats": deduped,
+        "default_format": default["format_id"] if default else None,
+        "can_play": bool(best_progressive),
+        "play_format": best_progressive["format_id"] if best_progressive else None,
+        "best_video": best_video["format_id"] if best_video else None,
+        "best_audio": best_audio["format_id"] if best_audio else None,
+        "ffmpeg": _ffmpeg_available(),
+    }
+
+
+def _duration_text(seconds) -> str:
+    try:
+        seconds = int(seconds or 0)
+    except (TypeError, ValueError):
+        return ""
+    if seconds <= 0:
+        return ""
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+# Direct media URLs expire, and merging can take minutes, so an entry is kept
+# for a while: the page resolves a link, then asks for a specific format, then
+# downloads the result. Keyed by a random token so nothing user-specific leaks.
+_SOCIAL_STORE: dict = {}
+_SOCIAL_TTL = 3600
+_SOCIAL_LOCK = threading.Lock()
+
+
+def _social_store_put(payload: dict) -> str:
+    token = secrets.token_urlsafe(12)
+    with _SOCIAL_LOCK:
+        now = time.time()
+        for key, (at, _v) in list(_SOCIAL_STORE.items()):
+            if now - at > _SOCIAL_TTL:
+                _SOCIAL_STORE.pop(key, None)
+        _SOCIAL_STORE[token] = (now, payload)
+    return token
+
+
+def _social_store_get(token: str):
+    record = _SOCIAL_STORE.get(token)
+    if not record or (time.time() - record[0]) > _SOCIAL_TTL:
+        return None
+    return record[1]
+
+
+def _format_for_url(url: str, format_id: str):
+    """Resolve one format into a spec the stream and download routes can use.
+
+    A single-file (or audio-only) format is handed over directly, an HLS
+    playlist is proxied, and a video-only track is paired with audio and merged.
+    """
+    info, cookies = _extract_info(url)
+    formats = info.get("formats") or ([info] if info.get("url") else [])
+    chosen = next((f for f in formats if str(f.get("format_id")) == str(format_id)), None)
+    if chosen is None and formats:
+        chosen = formats[-1]
+    if chosen is None:
+        raise SocialError("That format is no longer available; fetch the link again.")
+
+    has_video = chosen.get("vcodec") != "none"
+    has_audio = chosen.get("acodec") != "none"
+    progressive = has_video and has_audio
+
+    protocol = (chosen.get("protocol") or "").lower()
+    if protocol.startswith("m3u8"):
+        # An HLS manifest: the URL is a playlist, not a file, so it is rewritten
+        # to same-origin segment URLs before the browser sees it.
+        return {
+            "hls": True,
+            "format_id": str(chosen.get("format_id")),
+            "url": chosen["url"],
+            "headers": chosen.get("http_headers") or {},
+            "cookies": cookies,
+            "ext": "mp4",
+            "title": info.get("title") or "video",
+            "is_audio": not has_video,
+        }
+
+    if progressive or not has_video:
+        # Single file (video+audio, or an audio track): hand it over directly.
+        return {
+            "direct": True,
+            "url": chosen["url"],
+            "headers": chosen.get("http_headers") or {},
+            "cookies": cookies,
+            "ext": chosen.get("ext") or "mp4",
+            "title": info.get("title") or "video",
+            "is_audio": not has_video,
+        }
+
+    # Video-only: pair it with the best audio and merge. Needs ffmpeg.
+    if not _ffmpeg_available():
+        raise SocialError("High-quality merging needs ffmpeg, which is not "
+                          "installed on the server. Pick a single-file format.")
+    audio = None
+    for f in formats:
+        if f.get("vcodec") == "none" and f.get("acodec") != "none":
+            if audio is None or (f.get("abr") or 0) > (audio.get("abr") or 0):
+                audio = f
+    return {
+        "direct": False,
+        "video": chosen,
+        "audio": audio,
+        "cookies": cookies,
+        "ext": "mp4",
+        "title": info.get("title") or "video",
+    }
+
+
+# HLS playlists proxied for the social downloader. Each entry keeps the segment
+# URLs together with the headers/cookies they need, since some CDNs sign each
+# segment against the session that produced the manifest.
+_SOCIAL_HLS: dict = {}
+_SOCIAL_HLS_TTL = 1800
+
+
+def _prune_hls():
+    """Drop expired HLS playlists so the cache cannot grow without bound."""
+    cutoff = time.time() - _SOCIAL_HLS_TTL
+    for token in [t for t, rec in _SOCIAL_HLS.items() if rec[0] < cutoff]:
+        _SOCIAL_HLS.pop(token, None)
+
+
+def _social_hls_playlist(url: str, headers: dict, cookies: dict, depth: int = 0):
+    """Fetch an HLS manifest and return it rewritten to same-origin segments."""
+    try:
+        resp = _request_session().get(url, headers=headers,
+                                      cookies=cookies or None, timeout=60)
+    except _request_error() as exc:
+        raise SocialError(f"The stream could not be fetched ({exc}).") from exc
+    text = resp.text or ""
+    if not text.startswith("#EXTM3U"):
+        raise SocialError("The source did not return a valid stream.")
+
+    lines = [ln.strip() for ln in text.splitlines()]
+    # A master playlist points at variant playlists; follow the first one.
+    if any(ln.startswith("#EXT-X-STREAM-INF") for ln in lines) and depth < 3:
+        variant = next((ln for ln in lines
+                        if ln and not ln.startswith("#")), None)
+        if variant:
+            return _social_hls_playlist(urllib.parse.urljoin(url, variant),
+                                        headers, cookies, depth + 1)
+
+    segments = [urllib.parse.urljoin(url, ln) for ln in lines
+                if ln and not ln.startswith("#")]
+    if not segments:
+        raise SocialError("The stream had no playable segments.")
+
+    token = secrets.token_urlsafe(12)
+    _prune_hls()
+    _SOCIAL_HLS[token] = (time.time(), segments, headers, cookies)
+
+    out = []
+    index = 0
+    for ln in lines:
+        if ln and not ln.startswith("#"):
+            out.append(f"/api/social/hls/{token}/{index}.ts")
+            index += 1
+        else:
+            out.append(ln)
+    if "#EXT-X-ENDLIST" not in text:
+        out.append("#EXT-X-ENDLIST")
+    return Response("\n".join(out) + "\n",
+                    headers={"Content-Type": "application/vnd.apple.mpegurl",
+                             "Cache-Control": "no-store"})
+
+
+def _simple_cookie(name: str, value: str, domain: str = ""):
+    """A cookielib cookie for one name/value pair."""
+    import http.cookiejar as cookiejar
+    domain = domain.lstrip(".") or ""
+    return cookiejar.Cookie(
+        version=0, name=name, value=value, port=None, port_specified=False,
+        domain=domain, domain_specified=bool(domain),
+        domain_initial_dot=False, path="/", path_specified=True,
+        secure=False, expires=None, discard=True, comment=None,
+        comment_url=None, rest={}, rfc2109=False)
+
+
+def _selector_for_spec(spec: dict) -> str:
+    """A yt-dlp format selector for a resolved spec."""
+    if spec.get("video"):
+        video = spec["video"]
+        audio = spec.get("audio")
+        if audio is not None:
+            return f"{video.get('format_id')}+{audio.get('format_id')}"
+        return str(video.get("format_id"))
+    return spec.get("format_id") or "best"
+
+
+def _download_to_file(page_url: str, selector: str, workdir: str,
+                      cookies: dict) -> str:
+    """Download a format (merging audio when needed) into `workdir`.
+
+    yt-dlp drives the download so HLS playlists and DASH pairs are handled the
+    same way; ffmpeg does the muxing for separate video and audio tracks.
+    """
+    import yt_dlp
+
+    opts = _base_ydl_opts(quiet=True)
+    opts["skip_download"] = False
+    opts["outtmpl"] = os.path.join(workdir, "media.%(ext)s")
+    opts["merge_output_format"] = "mp4"
+    opts["format"] = selector
+    cookie = _cookie_file()
+    if cookie:
+        opts["cookiefile"] = cookie
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        # Carry over the cookies gathered while extracting, since the signed
+        # media URL is only valid alongside them.
+        for name, value in (cookies or {}).items():
+            ydl.cookiejar.set_cookie(_simple_cookie(name, value))
+        ydl.extract_info(page_url, download=True)
+
+    for name in sorted(os.listdir(workdir)):
+        if name.startswith("media."):
+            return os.path.join(workdir, name)
+    raise SocialError("The file could not be produced.")
+
+
+@app.route("/api/social/platforms")
+def api_social_platforms():
+    """List the supported platforms, for the home page grid."""
+    return jsonify({
+        "ok": True,
+        "platforms": social_platform_list(),
+        "engine": _ytdlp_available(),
+        "ffmpeg": _ffmpeg_available(),
+    })
+
+
+@app.route("/api/social/resolve", methods=["POST"])
+def api_social_resolve():
+    """Resolve a social link into metadata plus the formats on offer."""
+    link = ((request.json or {}).get("link") or "").strip()
+    if not link:
+        return jsonify({"ok": False, "error": "Please paste a link first."}), 400
+    if not re.match(r"^https?://", link, re.I):
+        return jsonify({"ok": False, "error": "That does not look like a link."}), 400
+    try:
+        media = social_extract(link)
+    except SocialError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001 - surfaced to the UI
+        return jsonify({"ok": False, "error": f"Unexpected error: {exc}"}), 500
+
+    media["token"] = _social_store_put({"url": link, "media": media})
+    return jsonify({"ok": True, "media": media})
+
+
+@app.route("/api/social/stream")
+def api_social_stream():
+    """Stream one format for in-page playback (Range-capable)."""
+    url = request.args.get("link", "").strip()
+    format_id = request.args.get("format", "").strip()
+    if not url:
+        return jsonify({"ok": False, "error": "Missing link."}), 400
+    try:
+        spec = _format_for_url(url, format_id)
+    except SocialError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    if not spec.get("direct") and not spec.get("hls"):
+        return jsonify({"ok": False, "error": "This quality must be downloaded, "
+                        "not streamed. Use the Download button."}), 400
+
+    if spec.get("hls"):
+        try:
+            return _social_hls_playlist(spec["url"], spec["headers"], spec["cookies"])
+        except SocialError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    headers = dict(spec.get("headers") or {})
+    if request.headers.get("Range"):
+        headers["Range"] = request.headers["Range"]
+    try:
+        upstream = _request_session().get(spec["url"], headers=headers,
+                                          cookies=spec.get("cookies") or None,
+                                          stream=True, timeout=60)
+    except _request_error() as exc:
+        return jsonify({"ok": False, "error": f"Stream fetch failed: {exc}"}), 502
+    if upstream.status_code not in (200, 206):
+        upstream.close()
+        return jsonify({"ok": False, "error": f"The source returned status "
+                        f"{upstream.status_code}."}), 400
+
+    ctype = "audio/mpeg" if spec.get("is_audio") else "video/mp4"
+    return _proxy_stream(upstream, as_attachment=False,
+                         filename=f"stream.{spec['ext']}", content_type=ctype)
+
+
+@app.route("/api/social/download")
+def api_social_download():
+    """Hand back a file: a single progressive stream, or a freshly merged MP4."""
+    url = request.args.get("link", "").strip()
+    format_id = request.args.get("format", "").strip()
+    if not url:
+        return jsonify({"ok": False, "error": "Missing link."}), 400
+    try:
+        spec = _format_for_url(url, format_id)
+    except SocialError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    safe = re.sub(r"[^\w\-. ]+", "_", spec.get("title") or "video").strip() or "video"
+    safe = safe[:120]
+
+    if spec.get("direct") and not spec.get("hls"):
+        headers = dict(spec.get("headers") or {})
+        if request.headers.get("Range"):
+            headers["Range"] = request.headers["Range"]
+        try:
+            upstream = _request_session().get(spec["url"], headers=headers,
+                                              cookies=spec.get("cookies") or None,
+                                              stream=True, timeout=60)
+        except _request_error() as exc:
+            return jsonify({"ok": False, "error": f"Download failed: {exc}"}), 502
+        if upstream.status_code not in (200, 206):
+            upstream.close()
+            return jsonify({"ok": False, "error": f"The source returned status "
+                            f"{upstream.status_code}."}), 400
+        filename = f"{safe}.{spec['ext']}"
+        return _proxy_stream(upstream, as_attachment=True, filename=filename)
+
+    # Anything that is not a single ready file - a video-only stream, an HLS
+    # playlist, or a separate audio track - is downloaded and muxed to MP4.
+    selector = _selector_for_spec(spec)
+    workdir = tempfile.mkdtemp(prefix="social-")
+    try:
+        try:
+            path = _download_to_file(url, selector, workdir, spec.get("cookies"))
+        except SocialError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SocialError(_friendly_download_error(exc)) from exc
+
+        filename = f"{safe}.mp4"
+
+        def stream_and_cleanup():
+            try:
+                with open(path, "rb") as fh:
+                    while True:
+                        chunk = fh.read(256 * 1024)
+                        if not chunk:
+                            break
+                        yield chunk
+            finally:
+                shutil.rmtree(workdir, ignore_errors=True)
+
+        size = os.path.getsize(path)
+        return Response(stream_and_cleanup(), headers={
+            "Content-Type": "video/mp4",
+            "Content-Length": str(size),
+            "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(filename)}",
+        })
+    except SocialError as exc:
+        shutil.rmtree(workdir, ignore_errors=True)
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(workdir, ignore_errors=True)
+        return jsonify({"ok": False, "error": f"Unexpected error: {exc}"}), 500
+
+
+@app.route("/api/social/hls/<token>/<int:index>.ts")
+def api_social_hls_segment(token: str, index: int):
+    """Proxy one HLS segment (same-origin so the browser can play it)."""
+    record = _SOCIAL_HLS.get(token)
+    if not record or (time.time() - record[0]) > _SOCIAL_HLS_TTL:
+        return jsonify({"ok": False, "error": "This stream has expired; reopen the video."}), 410
+    _, segments, headers, cookies = record
+    if index < 0 or index >= len(segments):
+        return jsonify({"ok": False, "error": "No such segment."}), 404
+    try:
+        upstream = _request_session().get(segments[index], headers=headers,
+                                          cookies=cookies or None,
+                                          stream=True, timeout=60)
+    except _request_error() as exc:
+        return jsonify({"ok": False, "error": f"Segment fetch failed: {exc}"}), 502
+    relay = _proxy_stream(upstream, as_attachment=False, filename=f"{index}.ts")
+    relay.headers["Content-Type"] = "video/mp2t"  # CDNs often send octet-stream
+    return relay
+
+
+# ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
 
@@ -847,7 +1549,7 @@ INDEX_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TeraBox Downloader - Tech Arslan Software Solutions</title>
+<title>All-in-One Video Downloader - Tech Arslan Software Solutions</title>
 <style>
   :root{
     --bg:#0a0f1c; --bg-2:#0e1526; --surface:#131c31; --surface-2:#1a2540;
@@ -987,6 +1689,48 @@ INDEX_HTML = """<!doctype html>
   .empty{color:var(--muted-2);font-size:.83rem;padding:26px 12px;text-align:center;border:1px dashed var(--border);
          border-radius:var(--radius-sm);}
 
+  /* social downloader */
+  .maintabs{margin-bottom:16px;}
+  .hero{margin:2px 0 16px;}
+  .hero h2{margin:0 0 7px;font-size:1.22rem;letter-spacing:-.3px;}
+  .hero p{margin:0;color:var(--muted);font-size:.84rem;line-height:1.6;}
+  .platwrap{margin:16px 0;}
+  .plathead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;
+        color:var(--muted-2);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1.1px;}
+  .platcount{background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:2px 10px;
+        color:var(--muted);font-size:.68rem;letter-spacing:.4px;}
+  .platforms{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:9px;}
+  .plat{display:flex;align-items:center;gap:9px;padding:10px 11px;border-radius:12px;cursor:pointer;
+        background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);
+        color:var(--text);font-size:.78rem;font-weight:600;text-align:left;transition:.15s;min-width:0;}
+  .plat:hover{border-color:var(--border-2);transform:translateY(-1px);}
+  .plat.active{border-color:var(--primary);background:rgba(99,102,241,.16);}
+  .plat .pd{width:22px;height:22px;flex-shrink:0;border-radius:7px;display:flex;align-items:center;justify-content:center;
+        font-size:.62rem;font-weight:800;color:#fff;}
+  .plat .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .platnote{color:var(--muted-2);font-size:.72rem;margin-top:9px;}
+  .result{display:flex;gap:14px;align-items:center;}
+  .rthumb{width:118px;height:68px;flex-shrink:0;border-radius:11px;overflow:hidden;background:var(--surface-2);
+        border:1px solid var(--border);display:flex;align-items:center;justify-content:center;}
+  .rthumb img{width:100%;height:100%;object-fit:cover;display:block;}
+  .rthumb svg{width:26px;height:26px;fill:var(--muted-2);}
+  .rmeta{min-width:0;flex:1;}
+  .rtitle{font-size:.94rem;font-weight:700;line-height:1.35;margin-bottom:4px;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .rsub{color:var(--muted);font-size:.76rem;}
+  .rtags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .rtag{font-size:.68rem;font-weight:600;color:var(--muted);border:1px solid var(--border);
+        background:var(--surface-2);border-radius:999px;padding:3px 9px;}
+  .fhead{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;justify-content:space-between;margin-bottom:11px;}
+  .fhead span:first-child{font-size:.8rem;font-weight:700;color:var(--muted);}
+  .fhint{color:var(--muted-2);font-size:.7rem;}
+  .flist{display:flex;flex-direction:column;gap:8px;}
+  .frow{display:flex;align-items:center;gap:11px;padding:10px 11px;border-radius:11px;
+        background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);}
+  .frow .fq{font-size:.83rem;font-weight:700;min-width:96px;}
+  .frow .fm{color:var(--muted-2);font-size:.72rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .frow .fa{display:flex;gap:7px;flex-shrink:0;}
+
   /* player: a full page, so the video gets the whole screen */
   #player{position:fixed;inset:0;background:#04070d;display:flex;align-items:stretch;justify-content:center;
           padding:0;z-index:60;}
@@ -1101,6 +1845,15 @@ INDEX_HTML = """<!doctype html>
     .foot-top{gap:16px;padding:16px 16px 14px;}
     .foot-badges{max-width:100%;}
     .foot-bar{flex-direction:column;align-items:flex-start;gap:6px;padding:11px 16px;}
+    .platforms{grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;}
+    .plat{padding:9px;font-size:.74rem;gap:7px;}
+    .result{flex-direction:column;align-items:stretch;gap:11px;}
+    .rthumb{width:100%;height:150px;}
+    .frow{flex-wrap:wrap;}
+    .frow .fq{min-width:auto;flex:1;}
+    .frow .fm{flex-basis:100%;order:3;}
+    .frow .fa{width:100%;justify-content:flex-start;}
+    .frow .fa .btn{flex:1;}
     .phead{padding:10px 12px;}
     .ptitle .t{font-size:.82rem;}
     .cbtn{width:34px;height:34px;}
@@ -1118,7 +1871,7 @@ INDEX_HTML = """<!doctype html>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9A1.5 1.5 0 0 1 18.5 16H13l-3.4 3.1A.7.7 0 0 1 8.4 18.6V16H5.5A1.5 1.5 0 0 1 4 14.5v-9Zm6 2.6v4.8l4.2-2.4L10 8.1Z"/></svg>
       </div>
       <div>
-        <div class="brandname">TeraBox Downloader</div>
+        <div class="brandname">All-in-One Video Downloader</div>
         <div class="brandtag">Tech Arslan Software Solutions</div>
       </div>
     </div>
@@ -1128,48 +1881,103 @@ INDEX_HTML = """<!doctype html>
     </div>
   </div>
 
-  <div class="note">
-    No account needed. TeraBox refuses anonymous direct downloads, so the app streams the full
-    video through a helper service. That service sees the links you paste, and its copy is a
-    transcoded stream (downloaded as <code>.ts</code>), not TeraBox's original file. Set
-    <code>TERABOX_COOKIE</code> (see the README) to download the original MP4 instead, or
-    <code>TERABOX_FALLBACK=off</code> to disable the helper.
-  </div>
-
-  <div class="card">
-    <label for="link">TeraBox share link</label>
-    <div class="input-wrap">
-      <input id="link" type="text" placeholder="https://www.terabox.com/s/xxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
-      <button id="paste" class="btn ghost sm">Paste</button>
-    </div>
-    <div class="row">
-      <button id="fetch" class="btn primary">Fetch files</button>
-      <button id="clear" class="btn ghost">Clear</button>
-    </div>
-    <div id="status" class="status"></div>
-  </div>
-
-  <nav class="tabs">
-    <button class="tab active" data-tab="files">Files <span class="count" id="filesCount">0</span></button>
-    <button class="tab" data-tab="history">History <span class="count" id="histCount">0</span></button>
+  <nav class="tabs maintabs">
+    <button class="tab active" data-page="social">Social Downloader</button>
+    <button class="tab" data-page="terabox">TeraBox</button>
   </nav>
 
-  <section id="tab-files">
-    <div id="files" class="list"></div>
-    <div id="filesEmpty" class="empty">No files yet. Paste a share link above and press Fetch files.</div>
+  <section id="page-social" class="page">
+    <div class="hero">
+      <h2>Download videos from any social platform</h2>
+      <p>Paste a link from YouTube, Instagram, Facebook, TikTok, X and more. Play it right here when a
+        single-file stream is available, or download it as an MP4.</p>
+    </div>
+
+    <div class="card">
+      <label for="sLink">Paste a video link</label>
+      <div class="input-wrap">
+        <input id="sLink" type="text" placeholder="https://www.youtube.com/watch?v=...  or any supported link" autocomplete="off">
+        <button id="sPaste" class="btn ghost sm">Paste</button>
+      </div>
+      <div class="row">
+        <button id="sFetch" class="btn primary">Get video</button>
+        <button id="sClear" class="btn ghost">Clear</button>
+      </div>
+      <div id="sStatus" class="status"></div>
+    </div>
+
+    <div class="platwrap">
+      <div class="plathead">
+        <span>Supported platforms</span>
+        <span class="platcount" id="platCount">30+</span>
+      </div>
+      <div id="platforms" class="platforms"></div>
+      <div class="platnote">Tap a platform to copy its name into the box, then paste the full link.</div>
+    </div>
+
+    <div id="sResult" class="hidden">
+      <div class="card result">
+        <div class="rthumb" id="sThumb"></div>
+        <div class="rmeta">
+          <div class="rtitle" id="sTitle">Video</div>
+          <div class="rsub" id="sSub"></div>
+          <div class="rtags" id="sTags"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="fhead">
+          <span>Choose quality</span>
+          <span class="fhint">Play works on single-file streams; other qualities download as MP4.</span>
+        </div>
+        <div id="sFormats" class="flist"></div>
+      </div>
+    </div>
   </section>
 
-  <section id="tab-history" class="hidden">
-    <div class="pane-head">
-      <div class="filters">
-        <button class="chip active" data-filter="all">All</button>
-        <button class="chip" data-filter="played">Played</button>
-        <button class="chip" data-filter="downloaded">Downloaded</button>
-      </div>
-      <button id="histClear" class="btn ghost sm hidden">Clear history</button>
+  <section id="page-terabox" class="page hidden">
+    <div class="note">
+      No account needed. TeraBox refuses anonymous direct downloads, so the app streams the full
+      video through a helper service. That service sees the links you paste, and its copy is a
+      transcoded stream (downloaded as <code>.ts</code>), not TeraBox's original file. Set
+      <code>TERABOX_COOKIE</code> (see the README) to download the original MP4 instead, or
+      <code>TERABOX_FALLBACK=off</code> to disable the helper.
     </div>
-    <div id="history" class="list"></div>
-    <div id="histEmpty" class="empty">Videos you play or download will show up here.</div>
+
+    <div class="card">
+      <label for="link">TeraBox share link</label>
+      <div class="input-wrap">
+        <input id="link" type="text" placeholder="https://www.terabox.com/s/xxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+        <button id="paste" class="btn ghost sm">Paste</button>
+      </div>
+      <div class="row">
+        <button id="fetch" class="btn primary">Fetch files</button>
+        <button id="clear" class="btn ghost">Clear</button>
+      </div>
+      <div id="status" class="status"></div>
+    </div>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="files">Files <span class="count" id="filesCount">0</span></button>
+      <button class="tab" data-tab="history">History <span class="count" id="histCount">0</span></button>
+    </nav>
+
+    <section id="tab-files">
+      <div id="files" class="list"></div>
+      <div id="filesEmpty" class="empty">No files yet. Paste a share link above and press Fetch files.</div>
+    </section>
+
+    <section id="tab-history" class="hidden">
+      <div class="pane-head">
+        <div class="filters">
+          <button class="chip active" data-filter="all">All</button>
+          <button class="chip" data-filter="played">Played</button>
+          <button class="chip" data-filter="downloaded">Downloaded</button>
+        </div>
+        <button id="histClear" class="btn ghost sm hidden">Clear history</button>
+      </div>
+      <div id="history" class="list"></div>
+      <div id="histEmpty" class="empty">Videos you play or download will show up here.</div>
+    </section>
   </section>
 </div>
 
@@ -1297,7 +2105,7 @@ INDEX_HTML = """<!doctype html>
       </div>
       <div>
         <div class="foot-name">Tech Arslan Software Solutions</div>
-        <div class="foot-tag">TeraBox Downloader</div>
+        <div class="foot-tag">All-in-One Video Downloader</div>
       </div>
     </div>
     <div class="foot-meta">
@@ -1347,10 +2155,19 @@ function fmtTime(sec){
 }
 function esc(s){ const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 
+// --- Pages (Social Downloader / TeraBox) -----------------------------------
+function switchPage(name){
+  document.querySelectorAll('.maintabs .tab').forEach(t => t.classList.toggle('active', t.dataset.page === name));
+  $('page-social').classList.toggle('hidden', name !== 'social');
+  $('page-terabox').classList.toggle('hidden', name !== 'terabox');
+}
+document.querySelectorAll('.maintabs .tab').forEach(t =>
+  t.addEventListener('click', () => switchPage(t.dataset.page)));
+
 // --- Tabs ------------------------------------------------------------------
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+document.querySelectorAll('#page-terabox .tabs .tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
 function switchTab(name){
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('#page-terabox .tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   $('tab-files').classList.toggle('hidden', name !== 'files');
   $('tab-history').classList.toggle('hidden', name !== 'history');
 }
@@ -1406,15 +2223,27 @@ function renderHistory(){
 
     const actions = document.createElement('div');
     actions.className = 'actions';
+    const social = it.source === 'social';
     if (it.is_video) {
       const play = document.createElement('button');
       play.className = 'act play'; play.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Play';
-      play.addEventListener('click', () => openPlayer(f, it.link));
+      if (social) {
+        if (it.playable) play.addEventListener('click', () => socialPlay(
+          { url: it.link, title: it.name }, { format_id: it.id, label: it.tag || 'Stream', audio_only: false }));
+        else play.disabled = true;
+      } else {
+        play.addEventListener('click', () => openPlayer(f, it.link));
+      }
       actions.append(play);
     }
     const dl = document.createElement('button');
     dl.className = 'act dl'; dl.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4l-4.7-4.7 1.4-1.4L12 13.6V3zM5 19h14v2H5z"/></svg>Download';
-    dl.addEventListener('click', () => startDownload(f, dl, it.link));
+    if (social) {
+      dl.addEventListener('click', () => socialDownload(
+        { url: it.link, title: it.name }, { format_id: it.id, progressive: it.progressive }, dl));
+    } else {
+      dl.addEventListener('click', () => startDownload(f, dl, it.link));
+    }
     actions.append(dl);
     const copy = document.createElement('button');
     copy.className = 'act icon'; copy.title = 'Copy share link';
@@ -1796,6 +2625,38 @@ function closePlayer(){
   }
 }
 
+// A plain (non-TeraBox) media URL played in the same full-page player. Used by
+// the social downloader, where the server already hands back a ready stream.
+async function openMediaPlayer(opts){
+  tearDownPlayer();
+  currentFile = { name: opts.title || 'Video' };
+  currentLink = '';
+  playAttempt++;
+  playerTitle.textContent = opts.title || 'Video';
+  playerTag.textContent = opts.tag || 'Stream';
+  playerTag.classList.remove('hidden'); playerTag.classList.remove('preview');
+  player.classList.remove('hidden');
+  document.body.classList.add('playing');
+  pushPlayerHistory();
+  playerMsg.textContent = '';
+  playerMsg.classList.remove('error');
+  showSpinner(true);
+  setPlayingIcon();
+  showControls();
+
+  const video = activeVideo;
+  video.volume = prefVolume;
+  video.muted = prefMuted;
+  video.src = opts.src;
+  video.addEventListener('loadedmetadata', () => { video.play().catch(() => {}); }, { once: true });
+  video.addEventListener('error', () => {
+    showSpinner(false);
+    playerMsg.classList.add('error');
+    playerMsg.textContent = 'This stream could not be played here. Try Download instead.';
+  }, { once: true });
+  try { video.load(); } catch (e) {}
+}
+
 // video events -> UI (bound to both videos; only the active one drives the UI)
 function bindVideo(v){
   v.addEventListener('loadeddata', () => { if (v !== activeVideo) return; showSpinner(false); setPlayingIcon(); });
@@ -2015,6 +2876,182 @@ pasteBtn.addEventListener('click', async () => {
   catch (e) { setStatus('Clipboard blocked - paste manually.', true); }
 });
 histClearBtn.addEventListener('click', () => { saveHistory([]); renderHistory(); });
+
+// --- Social downloader -----------------------------------------------------
+const S_PLAT = {
+  youtube:{c:'#ff0033',t:'YT'}, instagram:{c:'#e1306c',t:'IG'}, facebook:{c:'#1877f2',t:'FB'},
+  tiktok:{c:'#00f2ea',t:'TT'}, twitter:{c:'#4b5563',t:'X'}, whatsapp:{c:'#25d366',t:'WA'},
+  snapchat:{c:'#c9b400',t:'SC'}, linkedin:{c:'#0a66c2',t:'IN'}, pinterest:{c:'#e60023',t:'PT'},
+  reddit:{c:'#ff4500',t:'RD'}, threads:{c:'#4b5563',t:'TH'}, telegram:{c:'#2aabee',t:'TG'},
+  vimeo:{c:'#1ab7ea',t:'VM'}, dailymotion:{c:'#00aaff',t:'DM'}, twitch:{c:'#9146ff',t:'TW'},
+  tumblr:{c:'#36465d',t:'TU'}, soundcloud:{c:'#ff5500',t:'SC'}, bilibili:{c:'#fb7299',t:'BI'},
+  rumble:{c:'#85c742',t:'RU'}, odysee:{c:'#ef1970',t:'OD'}, streamable:{c:'#0f90fa',t:'ST'},
+  imgur:{c:'#1bb76e',t:'IM'}, likee:{c:'#ff0050',t:'LK'}, kwai:{c:'#ff5000',t:'KW'},
+  triller:{c:'#ff2b2b',t:'TR'}, coub:{c:'#f56c2d',t:'CO'}, mixcloud:{c:'#5000ff',t:'MX'},
+  bandcamp:{c:'#629aa9',t:'BC'}, '9gag':{c:'#6b7280',t:'9G'}, other:{c:'#8b93a7',t:'?'},
+};
+const sLinkEl = $('sLink'), sFetchBtn = $('sFetch'), sClearBtn = $('sClear');
+const sPasteBtn = $('sPaste'), sStatusEl = $('sStatus');
+const sResult = $('sResult'), sThumb = $('sThumb'), sTitle = $('sTitle'), sSub = $('sSub'), sTags = $('sTags');
+const sFormats = $('sFormats'), platformsEl = $('platforms'), platCountEl = $('platCount');
+let socialMedia = null;
+
+function sSetStatus(msg, isError){ sStatusEl.textContent = msg || ''; sStatusEl.className = 'status' + (isError ? ' error' : ''); }
+
+function humanSize(n){
+  if (!n || n < 0) return '';
+  const u = ['B','KB','MB','GB'];
+  let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : 1)) + ' ' + u[i];
+}
+function platBadge(key){
+  const p = S_PLAT[key] || S_PLAT.other;
+  return '<span class="pd" style="background:' + p.c + '">' + p.t + '</span>';
+}
+function renderPlatforms(list){
+  platformsEl.innerHTML = '';
+  platCountEl.textContent = list.length + ' sites';
+  for (const p of list) {
+    const b = document.createElement('button');
+    b.className = 'plat';
+    b.dataset.key = p.key;
+    b.innerHTML = platBadge(p.key) + '<span class="pn">' + esc(p.name) + '</span>';
+    b.title = 'Paste a ' + p.name + ' link';
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.plat').forEach(x => x.classList.toggle('active', x === b));
+      sLinkEl.focus();
+      sSetStatus('Paste the ' + p.name + ' link in the box, then press Get video.');
+    });
+    platformsEl.appendChild(b);
+  }
+}
+
+function renderResult(media){
+  socialMedia = media;
+  sResult.classList.remove('hidden');
+  if (media.thumbnail) {
+    sThumb.innerHTML = '<img alt="" src="' + esc(media.thumbnail) + '" referrerpolicy="no-referrer" onerror="this.remove()">';
+  } else {
+    sThumb.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 5h16v14H4V5zm2 2v10h12V7H6zm4 1.5 5 3.5-5 3.5v-7z"/></svg>';
+  }
+  sTitle.textContent = media.title || 'Video';
+  const bits = [];
+  if (media.uploader) bits.push(media.uploader);
+  if (media.duration_text) bits.push(media.duration_text);
+  if (media.is_live) bits.push('Live');
+  sSub.textContent = bits.join(' \u00b7 ');
+  const pname = (platformsEl.querySelector('.plat[data-key="' + media.platform + '"] .pn') || {}).textContent;
+  sTags.innerHTML =
+    (pname ? '<span class="rtag">' + esc(pname) + '</span>' : '') +
+    '<span class="rtag">' + media.formats.length + ' formats</span>' +
+    (media.can_play ? '<span class="rtag">Playable here</span>' : '<span class="rtag">Download only</span>');
+
+  sFormats.innerHTML = '';
+  for (const f of media.formats) {
+    const row = document.createElement('div');
+    row.className = 'frow';
+    const size = f.size ? humanSize(f.size) : '';
+    const meta = [f.resolution, f.audio_only ? 'audio' : '', size].filter(Boolean).join(' \u00b7 ');
+    row.innerHTML =
+      '<span class="fq">' + esc(f.label) + '</span>' +
+      '<span class="fm">' + esc(meta) + '</span>' +
+      '<span class="fa"></span>';
+    const actions = row.querySelector('.fa');
+    if (f.playable) {
+      const pb = document.createElement('button');
+      pb.className = 'btn primary sm';
+      pb.textContent = 'Play';
+      pb.addEventListener('click', () => socialPlay(media, f));
+      actions.appendChild(pb);
+    }
+    const db = document.createElement('button');
+    db.className = 'btn ' + (f.playable ? 'ghost' : 'primary') + ' sm';
+    db.textContent = 'Download';
+    db.addEventListener('click', () => socialDownload(media, f, db));
+    actions.appendChild(db);
+    sFormats.appendChild(row);
+  }
+}
+
+function socialPlay(media, f){
+  const url = '/api/social/stream?link=' + encodeURIComponent(media.url) + '&format=' + encodeURIComponent(f.format_id);
+  openMediaPlayer({
+    title: media.title,
+    tag: f.label,
+    src: url,
+    isAudio: !!f.audio_only,
+  });
+  addHistory({ kind: 'played', name: media.title, id: f.format_id, link: media.url,
+    is_video: true, source: 'social', playable: !!f.playable,
+    progressive: !!f.progressive, tag: f.label });
+}
+
+async function socialDownload(media, f, button){
+  const url = '/api/social/download?link=' + encodeURIComponent(media.url) + '&format=' + encodeURIComponent(f.format_id);
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Preparing\u2026';
+  sSetStatus(f.progressive ? 'Preparing download\u2026'
+                           : 'Merging video and audio on the server\u2026 this can take a moment.');
+  // The server sends the file as an attachment, so a hidden iframe starts the
+  // browser's own download and keeps the page responsive.
+  try {
+    const frame = document.createElement('iframe');
+    frame.style.display = 'none';
+    frame.src = url;
+    document.body.appendChild(frame);
+    setTimeout(() => frame.remove(), 120000);
+    addHistory({ kind: 'downloaded', name: media.title, id: f.format_id, link: media.url,
+      is_video: true, source: 'social', playable: !!f.playable,
+      progressive: !!f.progressive, tag: f.label });
+    setTimeout(() => sSetStatus('Download started. If nothing happened, the source refused it.'), 2500);
+  } catch (e) {
+    sSetStatus('Download failed to start: ' + e.message, true);
+  } finally {
+    setTimeout(() => { button.disabled = false; button.textContent = label; }, 1500);
+  }
+}
+
+async function socialFetch(){
+  const link = sLinkEl.value.trim();
+  if (!link) { sSetStatus('Please paste a link first.', true); return; }
+  sFetchBtn.disabled = true;
+  sSetStatus('Reading the link\u2026');
+  sResult.classList.add('hidden');
+  try {
+    const resp = await fetch('/api/social/resolve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ link })
+    });
+    const data = await resp.json();
+    if (!data.ok) { sSetStatus(data.error || 'Could not read that link.', true); return; }
+    renderResult(data.media);
+    sSetStatus('Found: ' + data.media.title);
+  } catch (e) {
+    sSetStatus('Request failed: ' + e.message, true);
+  } finally {
+    sFetchBtn.disabled = false;
+  }
+}
+
+sFetchBtn.addEventListener('click', socialFetch);
+sLinkEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); socialFetch(); } });
+sClearBtn.addEventListener('click', () => {
+  sLinkEl.value = ''; sResult.classList.add('hidden'); sSetStatus(''); socialMedia = null; sLinkEl.focus();
+});
+sPasteBtn.addEventListener('click', async () => {
+  try { const t = await navigator.clipboard.readText(); if (t) { sLinkEl.value = t.trim(); sSetStatus('Pasted. Press Get video.'); } }
+  catch (e) { sSetStatus('Clipboard blocked - paste manually.', true); }
+});
+
+(async () => {
+  try {
+    const resp = await fetch('/api/social/platforms');
+    const data = await resp.json();
+    if (data.ok) renderPlatforms(data.platforms);
+    if (data.ok && !data.engine) sSetStatus('The downloader engine is not installed on the server.', true);
+  } catch (e) {}
+})();
 
 renderHistory();
 $('year').textContent = new Date().getFullYear();

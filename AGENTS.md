@@ -2,15 +2,19 @@
 
 ## Project
 
-`terabox_app.py` — a single-file Flask web app that resolves a public TeraBox
-share link and downloads its files. `README.md` documents usage.
+`terabox_app.py` — a single-file Flask web app (branded "Tech Arslan Software
+Solutions") with two tools in one page: a **Social Downloader** (yt-dlp) for
+YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
+**TeraBox** share downloader. `README.md` documents usage.
 
 ## Environment
 
 - Bare Python 3.13, headless container. **No tkinter/display**, so a desktop GUI
   cannot run here; use a web app (the provided work hosts map to ports
   12000/12001).
-- Dependencies: `flask`, `curl_cffi` (`requirements.txt`).
+- Dependencies: `flask`, `curl_cffi`, `yt-dlp` (`requirements.txt`). `ffmpeg`
+  on `PATH` enables merged high-quality downloads; without it only single-file
+  (progressive) formats are offered.
 
 ## TeraBox API facts (measured)
 
@@ -52,9 +56,34 @@ share link and downloads its files. `README.md` documents usage.
 - A session cookie is bound to one TeraBox host and answers `errno -6` on others.
 - Soft rate limit: `errno 105` / `460030` after a burst; wait a minute.
 
+## Social downloader facts (measured)
+
+- `_extract_info(url) -> (info, cookies)` runs yt-dlp and returns the info dict
+  plus the extractor's cookie jar. The cookies matter: **TikTok signs its media
+  URLs against yt-dlp's session cookies**, so they are threaded through
+  resolve -> stream -> download or the CDN answers 403.
+- YouTube from a datacenter IP needs the `android` player client (see
+  `_YT_CLIENTS`); the `web` client is bot-blocked. Progressive format `18`
+  (360p MP4) streams and downloads cleanly.
+- `_format_for_url(url, format_id)` returns a spec: `{"direct": url, ...}` for a
+  single-file/audio-only format, `{"hls": True, "url": ..., ...}` for an m3u8
+  playlist, or a video+audio pair to merge with ffmpeg.
+- HLS playback: `_social_hls_playlist()` rewrites the manifest to same-origin
+  `/api/social/hls/<token>/<n>.ts` segment URLs; `_SOCIAL_HLS` is a TTL cache
+  (`_SOCIAL_HLS_TTL`) pruned by `_prune_hls()`.
+- Extraction occasionally fails transiently (empty format list from a CDN
+  hiccup); `_is_transient()` + one 1.5s retry turns that into a success.
+- Instagram, Facebook, Vimeo and age-gated content need a signed-in session;
+  supply a Netscape `cookies.txt` via `SOCIAL_COOKIES` (path or contents).
+
 ## Routes
 
 - `GET /` — the single-page UI.
+- `GET /api/social/platforms` — the supported-site list for the UI chips.
+- `POST /api/social/resolve` — extract metadata + formats (yt-dlp).
+- `GET /api/social/stream` — stream one format for playback (Range-capable).
+- `GET /api/social/download` — save one format as a file (ffmpeg-merged if needed).
+- `GET /api/social/hls/<token>/<n>.ts` — proxy one HLS segment.
 - `POST /api/resolve` — list a share's files (TeraBox, else helper).
 - `GET /api/prepare` — warm a file's helper entry so the next `/api/hls` is
   instant (returns JSON).

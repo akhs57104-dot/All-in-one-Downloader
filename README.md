@@ -1,7 +1,13 @@
-# TeraBox Downloader
+# All-in-One Video Downloader
 
-A single-file web app that resolves a public TeraBox share link, lists its
-files, plays videos in the browser, and downloads them.
+A single-file web app by **Tech Arslan Software Solutions** with two tools in one
+page:
+
+- **Social Downloader** — paste a link from YouTube, Instagram, Facebook, TikTok,
+  X, Dailymotion, Vimeo and ~25 more sites; play it in the browser or save it as
+  an MP4.
+- **TeraBox** — resolve a public TeraBox share link, list its files, play videos
+  in the browser, and download them.
 
 ## Run
 
@@ -10,9 +16,32 @@ pip install -r requirements.txt
 python3 terabox_app.py          # serves on http://0.0.0.0:12000
 ```
 
-Set `PORT` to change the port.
+Set `PORT` to change the port. `ffmpeg` on `PATH` is recommended: it lets yt-dlp
+merge separate video and audio tracks for the highest qualities. Without it, only
+single-file (progressive) streams are offered.
 
-## How it works
+## Social Downloader
+
+Backed by [yt-dlp](https://github.com/yt-dlp/yt-dlp). The flow is:
+
+1. `POST /api/social/resolve` extracts the media metadata and the list of
+   formats.
+2. `GET /api/social/stream` streams one format for in-page playback. It supports
+   HTTP `Range`, so seeking works. A single-file or audio-only format is proxied
+   straight through; an HLS format has its playlist rewritten to same-origin
+   segment URLs (served by `/api/social/hls/<token>/<n>.ts`).
+3. `GET /api/social/download` saves the chosen quality as a file, merging video
+   and audio with `ffmpeg` when the site only offers them separately.
+
+Session-bound sites (TikTok signs its media URLs against the extractor's own
+cookies) work because the cookies yt-dlp collected are threaded from extraction
+through to the stream and download requests.
+
+Some sites — Instagram, Facebook, and private or age-gated videos — refuse
+anonymous requests. Export a Netscape-format `cookies.txt` from a signed-in
+browser and pass it in via `SOCIAL_COOKIES` (see below).
+
+## TeraBox
 
 TeraBox no longer hands the bytes of a shared file to an anonymous visitor, so
 the app tries several routes in order and uses the first that works.
@@ -56,6 +85,7 @@ If `curl_cffi` is not installed the app falls back to plain `requests`.
 | Variable | Effect |
 |---|---|
 | `PORT` | Port to listen on (default `12000`). |
+| `SOCIAL_COOKIES` | A Netscape `cookies.txt` (a path, or the file's contents) for sites that need a signed-in session, such as Instagram and Facebook. |
 | `TERABOX_COOKIE` | A signed-in TeraBox cookie. Enables unlimited direct downloads at full quality. |
 | `TERABOX_FALLBACK` | Set to `off` to disable the third-party helper entirely. |
 | `TERABOX_FALLBACK_TOKEN` | Your own iteraplay `login_token`; raises the helper's quota. |
