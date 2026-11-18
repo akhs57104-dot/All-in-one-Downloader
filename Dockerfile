@@ -18,6 +18,7 @@ COPY . .
 # run the container as an unprivileged uid; a 0600 file from a checkout would
 # otherwise fail with "Permission denied" while gunicorn boots the worker.
 RUN chmod -R a+rX /app \
+    && chmod +x /app/start.sh /app/run.sh \
     && useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 USER appuser

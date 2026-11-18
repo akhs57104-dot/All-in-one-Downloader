@@ -34,9 +34,19 @@ Keep it running on any Linux box (auto-restarts if gunicorn ever exits):
 PORT=12000 nohup ./run.sh > /tmp/techarslan.out 2>&1 &
 ```
 
-Managed hosts: `Dockerfile`, `Procfile`, `railway.json`, `nixpacks.toml` and
-`render.yaml` are ready for Railway, Render, Heroku and similar. The container
-runs one gunicorn worker with threads and binds to the host's `$PORT`:
+Managed hosts: `Dockerfile`, `Procfile`, `railway.json`, `railpack.json`,
+`nixpacks.toml` and `render.yaml` are ready for Railway, Render, Heroku and
+similar. All three Railway builders work:
+
+* **Dockerfile** - pinned in `railway.json`, bundles `ffmpeg`.
+* **Railpack** (Railway's current default) - `railpack.json` adds `ffmpeg`
+  to both the build and runtime images.
+* **Nixpacks** (older) - `nixpacks.toml` adds `ffmpeg` via `aptPkgs`. Do not
+  declare `nixPkgs` there: that replaces the setup phase Nixpacks generates
+  for Python, and the build dies with `python: command not found`.
+
+The container runs one gunicorn worker with threads via `start.sh`, which
+binds to the host's `$PORT`:
 
 ```
 gunicorn --workers 1 --threads 8 --timeout 300 --no-control-socket --bind 0.0.0.0:$PORT wsgi:app
@@ -51,6 +61,9 @@ Two settings matter when a host reports the app as "crashed":
   runs as `appuser`. A checkout whose files are mode `0600` (owner-only) makes
   gunicorn die with `PermissionError: /app/wsgi.py` when the platform runs it
   as an unprivileged uid.
+
+`start.sh` also only passes `--no-control-socket` when the installed gunicorn
+supports it; gunicorn below 23 exits with `unrecognized arguments` otherwise.
 
 Docker (bundles `ffmpeg`):
 
