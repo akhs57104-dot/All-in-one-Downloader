@@ -29,10 +29,10 @@ supported platform in a searchable picker; selecting one shows a short card with
 where to copy the link from on that site and how the download works, and the
 platform is also picked automatically once a link resolves.
 
-The mainstream sites (YouTube, Instagram, Facebook, TikTok, X, WhatsApp and so
-on) are pulled out into a "Popular social media" row above the input and lead
-the sidebar picker in their own group, with the long tail under "All other
-sites" so it is out of the way. The featured set is `FEATURED_KEYS` in
+The paste box leads the page, then the mainstream sites (YouTube, Instagram,
+Facebook, TikTok, X, WhatsApp and so on) sit in a "Popular social media" row
+just below it. They also lead the sidebar picker in their own group, with the
+long tail under "All other sites" so it is out of the way. The featured set is `FEATURED_KEYS` in
 `terabox_app.py`; the server tags each entry with `featured: true/false` and the
 client groups on that. The flow is:
 

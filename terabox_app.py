@@ -1991,6 +1991,8 @@ INDEX_HTML = """<!doctype html>
         font-size:.62rem;font-weight:800;color:#fff;}
   .plat .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .platnote{color:var(--muted-2);font-size:.72rem;margin-top:9px;}
+  /* The paste box leads the page: it is what every visitor came to use. */
+  .pastecard{margin-bottom:16px;}
   /* Popular row: the mainstream sites, one tap away above the input. */
   .quickcard{margin-bottom:16px;}
   .quickrow{display:flex;flex-wrap:wrap;gap:8px;}
@@ -2232,6 +2234,19 @@ INDEX_HTML = """<!doctype html>
         single-file stream is available, or download it as an MP4.</p>
     </div>
 
+    <div class="card pastecard">
+      <label for="sLink">Paste a video link</label>
+      <div class="input-wrap">
+        <input id="sLink" type="text" placeholder="https://www.youtube.com/watch?v=...  or any supported link" autocomplete="off">
+        <button id="sPaste" class="btn ghost sm">Paste</button>
+      </div>
+      <div class="row">
+        <button id="sFetch" class="btn primary">Get video</button>
+        <button id="sClear" class="btn ghost">Clear</button>
+      </div>
+      <div id="sStatus" class="status"></div>
+    </div>
+
     <div class="card quickcard">
       <div class="plathead">
         <span>Popular social media</span>
@@ -2242,19 +2257,6 @@ INDEX_HTML = """<!doctype html>
 
     <div class="social-grid">
       <div class="col-main">
-        <div class="card">
-          <label for="sLink">Paste a video link</label>
-          <div class="input-wrap">
-            <input id="sLink" type="text" placeholder="https://www.youtube.com/watch?v=...  or any supported link" autocomplete="off">
-            <button id="sPaste" class="btn ghost sm">Paste</button>
-          </div>
-          <div class="row">
-            <button id="sFetch" class="btn primary">Get video</button>
-            <button id="sClear" class="btn ghost">Clear</button>
-          </div>
-          <div id="sStatus" class="status"></div>
-        </div>
-
         <div id="sResult" class="hidden">
           <div class="card result">
             <div class="rthumb" id="sThumb"></div>
