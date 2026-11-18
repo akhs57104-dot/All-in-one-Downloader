@@ -173,6 +173,19 @@ Other traps:
   fallback when `curl_cffi` is missing, so it is in `requirements.txt`; a
   Railpack/Nixpacks build that installs only the listed packages needs it
   there.
+- **The failing deploy is not this app.** The Railway project is
+  `remarkable-tenderness` and the deploys fail after a ~16 s build and ~7 s
+  runtime. The same tree builds and serves 200 on the Dockerfile, Railpack and
+  Nixpacks paths locally, under a read-only rootfs, and under a 512 MB cap
+  (peak ~75 MB). The public host
+  `remarkable-tenderness-production.up.railway.app` answers 200 but serves a
+  **different app** (title `ZIANTGYM`), so the service being health-checked is
+  not this repository. Reading Railway's runtime logs needs a dashboard login
+  or a project token, neither of which is available here; that is the one
+  piece of evidence still missing.
+- **Alternative platforms are wired up.** `render.yaml` (Docker runtime) and
+  `fly.toml` (Dockerfile, `/healthz` check, 1 GB) deploy the same repo, and
+  `Procfile` covers Heroku-style hosts. All three point at `bash ./start.sh`.
 
 ## Conventions
 
