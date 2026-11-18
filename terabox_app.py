@@ -1552,53 +1552,64 @@ INDEX_HTML = """<!doctype html>
 <title>All-in-One Video Downloader - Tech Arslan Software Solutions</title>
 <style>
   :root{
-    --bg:#0a0f1c; --bg-2:#0e1526; --surface:#131c31; --surface-2:#1a2540;
-    --border:#25324f; --border-2:#31415f;
-    --text:#e9eefb; --muted:#93a4c4; --muted-2:#6b7da0;
-    --primary:#6366f1; --primary-2:#8b5cf6; --accent:#22d3ee;
+    /* Professional navy/slate palette with a single confident blue accent. */
+    --bg:#0b1220; --bg-2:#0f172a; --surface:#141d31; --surface-2:#1b2740;
+    --border:#22304b; --border-2:#33456a;
+    --text:#e8eef8; --muted:#9aa9c2; --muted-2:#6e7f9c;
+    --primary:#2f6bff; --primary-2:#4f8cff; --accent:#38bdf8;
     --success:#22c55e; --danger:#ef4444; --warn:#f59e0b;
-    --radius:14px; --radius-sm:10px;
-    --shadow:0 18px 40px -18px rgba(0,0,0,.75);
+    --radius:16px; --radius-sm:11px;
+    --shadow:0 20px 44px -24px rgba(2,8,23,.85);
+    --shadow-sm:0 10px 24px -18px rgba(2,8,23,.9);
+    --focus:0 0 0 3px rgba(47,107,255,.35);
   }
   *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
   html,body{height:100%;}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Helvetica,Arial,sans-serif;
        color:var(--text);background:
-         radial-gradient(1200px 600px at 10% -10%,rgba(99,102,241,.18),transparent 60%),
-         radial-gradient(900px 500px at 100% 0%,rgba(139,92,246,.14),transparent 55%),
+         radial-gradient(1100px 520px at 12% -8%,rgba(47,107,255,.16),transparent 62%),
+         radial-gradient(820px 460px at 100% 2%,rgba(56,189,248,.10),transparent 58%),
          var(--bg);
-       display:flex;flex-direction:column;align-items:center;padding:26px 16px 60px;-webkit-font-smoothing:antialiased;}
-  .app{width:100%;max-width:760px;}
+       display:flex;flex-direction:column;align-items:center;padding:0 0 56px;-webkit-font-smoothing:antialiased;
+       text-rendering:optimizeLegibility;}
+  .app{width:100%;max-width:820px;padding:24px 16px 0;}
 
-  /* topbar */
-  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px;}
+  /* topbar: full-width sticky bar so the brand stays visible while scrolling */
+  .topbar{position:sticky;top:0;z-index:20;width:100%;padding:14px 16px;border-bottom:1px solid var(--border);
+        background:linear-gradient(180deg,rgba(11,18,32,.97),rgba(11,18,32,.84));
+        backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}
+  .topbar-inner{width:100%;max-width:820px;margin:0 auto;display:flex;align-items:center;
+        justify-content:space-between;gap:16px;}
   .brand{display:flex;align-items:center;gap:13px;min-width:0;}
-  .logo{width:46px;height:46px;flex-shrink:0;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  .logo{width:46px;height:46px;flex-shrink:0;border-radius:13px;display:flex;align-items:center;justify-content:center;
         color:#fff;position:relative;overflow:hidden;
-        background:linear-gradient(140deg,#6366f1 0%,#8b5cf6 55%,#22d3ee 130%);
-        box-shadow:0 12px 26px -12px rgba(99,102,241,.95),inset 0 1px 0 rgba(255,255,255,.28);}
-  .logo svg{width:26px;height:26px;display:block;}
-  .logo::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.18),transparent 60%);}
-  .brandname{font-size:1.16rem;font-weight:800;letter-spacing:-.3px;line-height:1.15;
-        background:linear-gradient(92deg,#ffffff,#c7d2fe 60%,#a5f3fc);
+        background:linear-gradient(140deg,#2f6bff 0%,#4f8cff 58%,#38bdf8 132%);
+        box-shadow:0 12px 26px -14px rgba(47,107,255,.95),inset 0 1px 0 rgba(255,255,255,.3);}
+  .logo svg{width:26px;height:26px;display:block;position:relative;z-index:1;}
+  .logo::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.2),transparent 62%);}
+  .brandname{font-size:1.14rem;font-weight:800;letter-spacing:-.3px;line-height:1.18;
+        background:linear-gradient(92deg,#ffffff,#d7e3ff 62%,#bae6fd);
         -webkit-background-clip:text;background-clip:text;color:transparent;}
-  .brandtag{display:flex;align-items:center;gap:6px;color:var(--muted-2);font-size:.72rem;font-weight:600;
-        letter-spacing:1.1px;text-transform:uppercase;margin-top:3px;}
+  .brandtag{display:flex;align-items:center;gap:6px;color:var(--muted-2);font-size:.7rem;font-weight:700;
+        letter-spacing:1.1px;text-transform:uppercase;margin-top:4px;}
   .brandtag::before{content:"";width:14px;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--primary),var(--accent));}
   .brandside{display:flex;align-items:center;gap:10px;}
-  .prod-pill{display:inline-flex;align-items:center;gap:7px;font-size:.72rem;font-weight:700;color:#dbe3ff;
-        border:1px solid rgba(99,102,241,.42);background:rgba(99,102,241,.13);border-radius:999px;padding:6px 13px;
+  .prod-pill{display:inline-flex;align-items:center;gap:7px;font-size:.72rem;font-weight:700;color:#d7e3ff;
+        border:1px solid rgba(47,107,255,.42);background:rgba(47,107,255,.13);border-radius:999px;padding:6px 13px;
         white-space:nowrap;}
   .prod-pill .dot{width:6px;height:6px;border-radius:50%;background:var(--success);box-shadow:0 0 8px var(--success);}
   .icon-btn{background:var(--surface);border:1px solid var(--border);color:var(--muted);width:38px;height:38px;
             border-radius:11px;cursor:pointer;font-size:1rem;font-weight:700;display:flex;align-items:center;
             justify-content:center;transition:.15s;}
   .icon-btn:hover{color:var(--text);border-color:var(--border-2);background:var(--surface-2);}
+  .icon-btn:focus-visible,.btn:focus-visible,.tab:focus-visible,.chip:focus-visible,.act:focus-visible,
+  .plat:focus-visible,.cbtn:focus-visible{outline:none;box-shadow:var(--focus);}
 
   /* footer */
-  .sitefoot{margin-top:30px;width:100%;max-width:760px;border:1px solid var(--border);border-radius:var(--radius);
+  .sitefoot{margin-top:34px;width:100%;max-width:820px;border:1px solid var(--border);border-radius:var(--radius);
         background:linear-gradient(180deg,var(--surface),var(--bg-2));box-shadow:var(--shadow);overflow:hidden;}
-  .foot-top{display:flex;flex-wrap:wrap;gap:22px;justify-content:space-between;padding:20px 20px 18px;}
+  .foot-top{display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between;padding:22px 22px 20px;}
   .foot-brand{display:flex;align-items:center;gap:12px;min-width:210px;}
   .foot-brand .logo{width:40px;height:40px;border-radius:12px;}
   .foot-brand .logo svg{width:22px;height:22px;}
@@ -1611,47 +1622,47 @@ INDEX_HTML = """<!doctype html>
   .fchip{font-size:.68rem;font-weight:600;color:var(--muted);border:1px solid var(--border);background:var(--surface-2);
         border-radius:999px;padding:5px 11px;white-space:nowrap;}
   .foot-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;
-        padding:12px 20px;border-top:1px solid var(--border);background:rgba(10,15,28,.55);}
+        padding:13px 22px;border-top:1px solid var(--border);background:rgba(8,13,24,.55);}
   .foot-bar .copy{color:var(--muted-2);font-size:.72rem;}
   .foot-bar .made{color:var(--muted-2);font-size:.72rem;display:flex;align-items:center;gap:6px;}
   .foot-bar .made strong{color:var(--muted);font-weight:700;}
 
   .card{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);
-        border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);margin-bottom:16px;}
+        border-radius:var(--radius);padding:18px;box-shadow:var(--shadow-sm);margin-bottom:16px;}
   label{display:block;font-size:.78rem;font-weight:600;color:var(--muted);margin-bottom:8px;letter-spacing:.2px;}
   .input-wrap{display:flex;gap:8px;}
   input[type=text]{flex:1;min-width:0;padding:12px 13px;border:1px solid var(--border);border-radius:var(--radius-sm);
        font-size:.92rem;background:var(--bg-2);color:var(--text);transition:.15s;}
   input[type=text]::placeholder{color:var(--muted-2);}
-  input[type=text]:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.22);}
+  input[type=text]:focus{outline:none;border-color:var(--primary);box-shadow:var(--focus);}
   .row{display:flex;gap:10px;margin-top:12px;}
   button{font-family:inherit;}
   .btn{border:1px solid transparent;border-radius:var(--radius-sm);padding:12px 18px;font-size:.88rem;font-weight:600;
        cursor:pointer;display:inline-flex;align-items:center;gap:8px;justify-content:center;transition:.15s;white-space:nowrap;}
   .btn svg{width:16px;height:16px;fill:currentColor;flex-shrink:0;}
   .primary{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;flex:1;
-           box-shadow:0 12px 26px -14px rgba(99,102,241,.95);}
+           box-shadow:0 12px 26px -16px rgba(47,107,255,.95);}
   .primary:hover{filter:brightness(1.08);}
   .primary:disabled{opacity:.55;cursor:default;filter:none;box-shadow:none;}
   .ghost{background:var(--surface-2);color:var(--text);border-color:var(--border);}
-  .ghost:hover{border-color:var(--border-2);background:#1f2c4a;}
+  .ghost:hover{border-color:var(--border-2);background:#20304d;}
   .sm{padding:9px 13px;font-size:.8rem;border-radius:9px;}
   .status{font-size:.83rem;color:var(--muted);min-height:18px;margin-top:11px;}
   .status.error{color:var(--danger);}
 
-  .note{background:linear-gradient(180deg,rgba(34,211,238,.09),rgba(34,211,238,.03));
-        border:1px solid rgba(34,211,238,.28);color:#b7e9f5;border-radius:var(--radius);
-        padding:13px 15px;font-size:.79rem;line-height:1.5;margin-bottom:16px;}
-  .note code{background:rgba(34,211,238,.14);color:#d9f6ff;padding:1px 6px;border-radius:5px;font-size:.76rem;}
+  .note{background:linear-gradient(180deg,rgba(56,189,248,.08),rgba(56,189,248,.02));
+        border:1px solid rgba(56,189,248,.26);color:#bfe6f6;border-radius:var(--radius);
+        padding:14px 16px;font-size:.79rem;line-height:1.55;margin-bottom:16px;}
+  .note code{background:rgba(56,189,248,.14);color:#d9f6ff;padding:1px 6px;border-radius:5px;font-size:.76rem;}
 
   /* tabs */
   .tabs{display:flex;gap:6px;background:var(--surface);border:1px solid var(--border);padding:6px;
-        border-radius:var(--radius);margin-bottom:16px;box-shadow:var(--shadow);}
-  .tab{flex:1;border:0;background:transparent;color:var(--muted);padding:11px 12px;border-radius:9px;
+        border-radius:var(--radius);margin-bottom:16px;box-shadow:var(--shadow-sm);}
+  .tab{flex:1;border:0;background:transparent;color:var(--muted);padding:11px 12px;border-radius:10px;
        font-size:.86rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s;}
-  .tab:hover{color:var(--text);}
+  .tab:hover{color:var(--text);background:rgba(255,255,255,.03);}
   .tab.active{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;
-              box-shadow:0 10px 22px -14px rgba(99,102,241,.95);}
+              box-shadow:0 10px 22px -16px rgba(47,107,255,.95);}
   .count{background:rgba(255,255,255,.16);color:inherit;border-radius:999px;padding:1px 8px;font-size:.72rem;font-weight:700;}
   .tab:not(.active) .count{background:var(--surface-2);color:var(--muted);}
 
@@ -1660,7 +1671,7 @@ INDEX_HTML = """<!doctype html>
   .chip{background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:7px 13px;
         border-radius:999px;font-size:.78rem;font-weight:600;cursor:pointer;transition:.15s;}
   .chip:hover{color:var(--text);}
-  .chip.active{background:rgba(99,102,241,.18);border-color:var(--primary);color:#c7c9ff;}
+  .chip.active{background:rgba(47,107,255,.18);border-color:var(--primary);color:#c3d5ff;}
 
   /* lists */
   .list{display:flex;flex-direction:column;gap:9px;}
@@ -1668,10 +1679,10 @@ INDEX_HTML = """<!doctype html>
         border:1px solid var(--border);border-radius:var(--radius-sm);transition:.15s;}
   .item:hover{border-color:var(--border-2);}
   .thumb{width:44px;height:44px;flex-shrink:0;border-radius:11px;display:flex;align-items:center;justify-content:center;
-         background:linear-gradient(135deg,rgba(99,102,241,.25),rgba(139,92,246,.2));color:#c9cbff;}
+         background:linear-gradient(135deg,rgba(47,107,255,.25),rgba(56,189,248,.18));color:#bcd2ff;}
   .thumb svg{width:20px;height:20px;fill:currentColor;}
   .thumb.played{background:linear-gradient(135deg,rgba(34,197,94,.28),rgba(34,197,94,.12));color:#86efac;}
-  .thumb.downloaded{background:linear-gradient(135deg,rgba(59,130,246,.28),rgba(34,211,238,.16));color:#93c5fd;}
+  .thumb.downloaded{background:linear-gradient(135deg,rgba(47,107,255,.28),rgba(56,189,248,.16));color:#93c5fd;}
   .meta{min-width:0;flex:1;}
   .name{font-size:.88rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .sub2{font-size:.74rem;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
@@ -1680,56 +1691,68 @@ INDEX_HTML = """<!doctype html>
   .act{border:1px solid var(--border);background:var(--surface-2);color:var(--text);padding:8px 13px;border-radius:9px;
        font-size:.78rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:.15s;}
   .act svg{width:14px;height:14px;fill:currentColor;}
-  .act:hover{border-color:var(--border-2);background:#22304f;}
+  .act:hover{border-color:var(--border-2);background:#233450;}
   .act.play{background:rgba(34,197,94,.16);border-color:rgba(34,197,94,.45);color:#86efac;}
   .act.play:hover{background:rgba(34,197,94,.26);}
   .act.dl{background:linear-gradient(135deg,var(--primary),var(--primary-2));border-color:transparent;color:#fff;}
   .act.dl:hover{filter:brightness(1.08);}
   .act.icon{padding:8px 10px;}
-  .empty{color:var(--muted-2);font-size:.83rem;padding:26px 12px;text-align:center;border:1px dashed var(--border);
-         border-radius:var(--radius-sm);}
+  .empty{color:var(--muted-2);font-size:.83rem;padding:28px 12px;text-align:center;border:1px dashed var(--border);
+         border-radius:var(--radius-sm);background:rgba(255,255,255,.012);}
 
   /* social downloader */
   .maintabs{margin-bottom:16px;}
-  .hero{margin:2px 0 16px;}
-  .hero h2{margin:0 0 7px;font-size:1.22rem;letter-spacing:-.3px;}
-  .hero p{margin:0;color:var(--muted);font-size:.84rem;line-height:1.6;}
+  .hero{margin:2px 0 18px;max-width:640px;}
+  .hero h2{margin:0 0 7px;font-size:1.32rem;letter-spacing:-.4px;line-height:1.25;}
+  .hero p{margin:0;color:var(--muted);font-size:.85rem;line-height:1.62;}
   .platwrap{margin:16px 0;}
   .plathead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;
         color:var(--muted-2);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1.1px;}
   .platcount{background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:2px 10px;
         color:var(--muted);font-size:.68rem;letter-spacing:.4px;}
-  .platforms{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:9px;}
+  .platforms{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:9px;}
   .plat{display:flex;align-items:center;gap:9px;padding:10px 11px;border-radius:12px;cursor:pointer;
         background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);
         color:var(--text);font-size:.78rem;font-weight:600;text-align:left;transition:.15s;min-width:0;}
   .plat:hover{border-color:var(--border-2);transform:translateY(-1px);}
-  .plat.active{border-color:var(--primary);background:rgba(99,102,241,.16);}
+  .plat.active{border-color:var(--primary);background:rgba(47,107,255,.16);}
   .plat .pd{width:22px;height:22px;flex-shrink:0;border-radius:7px;display:flex;align-items:center;justify-content:center;
         font-size:.62rem;font-weight:800;color:#fff;}
   .plat .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .platnote{color:var(--muted-2);font-size:.72rem;margin-top:9px;}
-  .result{display:flex;gap:14px;align-items:center;}
-  .rthumb{width:118px;height:68px;flex-shrink:0;border-radius:11px;overflow:hidden;background:var(--surface-2);
+  .result{display:flex;gap:16px;align-items:center;}
+  .rthumb{width:150px;height:86px;flex-shrink:0;border-radius:12px;overflow:hidden;background:var(--surface-2);
         border:1px solid var(--border);display:flex;align-items:center;justify-content:center;}
   .rthumb img{width:100%;height:100%;object-fit:cover;display:block;}
   .rthumb svg{width:26px;height:26px;fill:var(--muted-2);}
   .rmeta{min-width:0;flex:1;}
-  .rtitle{font-size:.94rem;font-weight:700;line-height:1.35;margin-bottom:4px;
+  .rtitle{font-size:.98rem;font-weight:700;line-height:1.35;margin-bottom:5px;
         display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
   .rsub{color:var(--muted);font-size:.76rem;}
-  .rtags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .rtags{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;}
   .rtag{font-size:.68rem;font-weight:600;color:var(--muted);border:1px solid var(--border);
         background:var(--surface-2);border-radius:999px;padding:3px 9px;}
   .fhead{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;justify-content:space-between;margin-bottom:11px;}
   .fhead span:first-child{font-size:.8rem;font-weight:700;color:var(--muted);}
   .fhint{color:var(--muted-2);font-size:.7rem;}
   .flist{display:flex;flex-direction:column;gap:8px;}
-  .frow{display:flex;align-items:center;gap:11px;padding:10px 11px;border-radius:11px;
-        background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);}
+  .frow{display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:11px;
+        background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);transition:.15s;}
+  .frow:hover{border-color:var(--border-2);}
   .frow .fq{font-size:.83rem;font-weight:700;min-width:96px;}
   .frow .fm{color:var(--muted-2);font-size:.72rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .frow .fa{display:flex;gap:7px;flex-shrink:0;}
+
+  /* Two columns on wide screens: the platform picker sits beside the input. */
+  .social-grid{display:block;}
+  @media (min-width:1000px){
+    .app,.sitefoot,.topbar-inner{max-width:1080px;}
+    .social-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:18px;align-items:start;}
+    .social-grid .col-main{min-width:0;}
+    .social-grid .col-side{min-width:0;position:sticky;top:96px;}
+    .social-grid .platwrap{margin-top:0;}
+    .platforms{grid-template-columns:repeat(auto-fill,minmax(104px,1fr));}
+  }
 
   /* player: a full page, so the video gets the whole screen */
   #player{position:fixed;inset:0;background:#04070d;display:flex;align-items:stretch;justify-content:center;
@@ -1864,8 +1887,8 @@ INDEX_HTML = """<!doctype html>
 </style>
 </head>
 <body>
-<div class="app">
-  <div class="topbar">
+<div class="topbar">
+  <div class="topbar-inner">
     <div class="brand">
       <div class="logo">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9A1.5 1.5 0 0 1 18.5 16H13l-3.4 3.1A.7.7 0 0 1 8.4 18.6V16H5.5A1.5 1.5 0 0 1 4 14.5v-9Zm6 2.6v4.8l4.2-2.4L10 8.1Z"/></svg>
@@ -1880,7 +1903,9 @@ INDEX_HTML = """<!doctype html>
       <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts">?</button>
     </div>
   </div>
+</div>
 
+<div class="app">
   <nav class="tabs maintabs">
     <button class="tab active" data-page="social">Social Downloader</button>
     <button class="tab" data-page="terabox">TeraBox</button>
@@ -1893,44 +1918,50 @@ INDEX_HTML = """<!doctype html>
         single-file stream is available, or download it as an MP4.</p>
     </div>
 
-    <div class="card">
-      <label for="sLink">Paste a video link</label>
-      <div class="input-wrap">
-        <input id="sLink" type="text" placeholder="https://www.youtube.com/watch?v=...  or any supported link" autocomplete="off">
-        <button id="sPaste" class="btn ghost sm">Paste</button>
-      </div>
-      <div class="row">
-        <button id="sFetch" class="btn primary">Get video</button>
-        <button id="sClear" class="btn ghost">Clear</button>
-      </div>
-      <div id="sStatus" class="status"></div>
-    </div>
+    <div class="social-grid">
+      <div class="col-main">
+        <div class="card">
+          <label for="sLink">Paste a video link</label>
+          <div class="input-wrap">
+            <input id="sLink" type="text" placeholder="https://www.youtube.com/watch?v=...  or any supported link" autocomplete="off">
+            <button id="sPaste" class="btn ghost sm">Paste</button>
+          </div>
+          <div class="row">
+            <button id="sFetch" class="btn primary">Get video</button>
+            <button id="sClear" class="btn ghost">Clear</button>
+          </div>
+          <div id="sStatus" class="status"></div>
+        </div>
 
-    <div class="platwrap">
-      <div class="plathead">
-        <span>Supported platforms</span>
-        <span class="platcount" id="platCount">30+</span>
-      </div>
-      <div id="platforms" class="platforms"></div>
-      <div class="platnote">Tap a platform to copy its name into the box, then paste the full link.</div>
-    </div>
-
-    <div id="sResult" class="hidden">
-      <div class="card result">
-        <div class="rthumb" id="sThumb"></div>
-        <div class="rmeta">
-          <div class="rtitle" id="sTitle">Video</div>
-          <div class="rsub" id="sSub"></div>
-          <div class="rtags" id="sTags"></div>
+        <div id="sResult" class="hidden">
+          <div class="card result">
+            <div class="rthumb" id="sThumb"></div>
+            <div class="rmeta">
+              <div class="rtitle" id="sTitle">Video</div>
+              <div class="rsub" id="sSub"></div>
+              <div class="rtags" id="sTags"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="fhead">
+              <span>Choose quality</span>
+              <span class="fhint">Play works on single-file streams; other qualities download as MP4.</span>
+            </div>
+            <div id="sFormats" class="flist"></div>
+          </div>
         </div>
       </div>
-      <div class="card">
-        <div class="fhead">
-          <span>Choose quality</span>
-          <span class="fhint">Play works on single-file streams; other qualities download as MP4.</span>
+
+      <aside class="col-side">
+        <div class="card platwrap">
+          <div class="plathead">
+            <span>Supported platforms</span>
+            <span class="platcount" id="platCount">30+</span>
+          </div>
+          <div id="platforms" class="platforms"></div>
+          <div class="platnote">Tap a platform to copy its name into the box, then paste the full link.</div>
         </div>
-        <div id="sFormats" class="flist"></div>
-      </div>
+      </aside>
     </div>
   </section>
 
