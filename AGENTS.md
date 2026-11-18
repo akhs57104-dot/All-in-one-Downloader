@@ -186,6 +186,15 @@ Other traps:
 - **Alternative platforms are wired up.** `render.yaml` (Docker runtime) and
   `fly.toml` (Dockerfile, `/healthz` check, 1 GB) deploy the same repo, and
   `Procfile` covers Heroku-style hosts. All three point at `bash ./start.sh`.
+- **No managed host can be deployed from here.** Railway fails at runtime with
+  no logs, and Fly.io, Render, Koyeb and Heroku all need an interactive login
+  or an API token that this environment does not have (the browser has no
+  session either). `tunnel.sh` is the fallback that needs no account: it starts
+  the app if needed and opens a Cloudflare quick tunnel, printing a
+  `https://*.trycloudflare.com` URL. That URL works end to end - home 200,
+  `/healthz` 200, 156 platforms, a 1 MB MP4 download verifies as valid MP4.
+  YouTube *downloads* answer 403 from a datacenter IP even locally, which is a
+  YouTube-side block, not an app bug; direct-file and non-YouTube links work.
 
 ## Conventions
 
