@@ -16,4 +16,5 @@ COPY . .
 
 EXPOSE 12000
 # One worker with threads: the app keeps token state in process memory.
-CMD ["gunicorn", "--workers", "1", "--threads", "8", "--timeout", "300", "--bind", "0.0.0.0:12000", "wsgi:app"]
+# Bind to $PORT when the host provides one, else 12000.
+CMD ["sh", "-c", "exec gunicorn --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:${PORT:-12000} wsgi:app"]
