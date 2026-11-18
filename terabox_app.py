@@ -1341,7 +1341,14 @@ def _extract_info(url: str) -> tuple:
             except Exception:  # noqa: BLE001 - fall through to the friendly error
                 pass
         if last_exc is not None:
-            raise SocialError(_friendly_download_error(last_exc)) from last_exc
+            # The extractor gave up, but the page may still carry the media in
+            # its HTML (Pinterest's videoUrls). Scrape before reporting failure.
+            scraped = _html_media_fallback(url)
+            if scraped is not None:
+                return scraped, {}
+            raise SocialError(
+                _with_platform_hint(url, _friendly_download_error(last_exc))
+            ) from last_exc
 
     if not isinstance(info, dict):
         # Telegram (and a few others) can return None instead of raising.
@@ -1384,6 +1391,9 @@ def _friendly_download_error(exc: Exception) -> str:
         return "No downloadable video or audio was found at that link."
     if "not available" in low or "removed" in low or "deleted" in low:
         return "That post is unavailable; it may have been removed."
+    if "404" in low or "not found" in low:
+        return ("That post was not found. Check the link, or it may have been "
+                "removed.")
     if "timed out" in low or "timeout" in low:
         return "The site took too long to answer. Please try again."
     # Strip yt-dlp's "ERROR: " prefix and any extractor tag for readability.
@@ -1393,6 +1403,136 @@ def _friendly_download_error(exc: Exception) -> str:
 
 class SocialError(Exception):
     """Raised with a message that is safe to show to the user."""
+
+
+def _html_title(html: str) -> str:
+    for pat in (r'<meta[^>]+property=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']',
+                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*property=["\']og:title["\']',
+                r'<title[^>]*>([^<]+)</title>'):
+        m = re.search(pat, html, re.I)
+        if m:
+            return _html_unescape(m.group(1)).strip()
+    return ""
+
+
+def _html_og_image(html: str) -> str:
+    m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
+                  html, re.I)
+    if not m:
+        m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*property=["\']og:image["\']',
+                      html, re.I)
+    return _html_unescape(m.group(1)).strip() if m else ""
+
+
+def _html_unescape(text: str) -> str:
+    return (text.replace("&amp;", "&").replace("&#x2F;", "/")
+            .replace("&quot;", '"').replace("&#39;", "'"))
+
+
+_HTML_IMAGE_EXT = re.compile(r"\.(jpe?g|png|gif|webp|svg|ico|avif)(\?|$)", re.I)
+# Only URLs that name a media file are trusted. Sites also embed their *player*
+# page URL in the same payloads (Vimeo's player.vimeo.com/video/<id> is HTML,
+# not a stream), and handing that to the browser yields an HTML file.
+_HTML_MEDIA_EXT = re.compile(r"\.(mp4|m4v|webm|mkv|mov|m3u8|mp3|m4a|aac|ogg|opus|wav)(\?|$)", re.I)
+
+
+def _html_media_fallback(url: str):
+    """Scrape a page's HTML for playable media, yt-dlp-shaped, or None.
+
+    A site's extractor can fail (or 404 on an unauth API call) while the page
+    itself still carries the media URL - Pinterest keeps plain MP4 and m3u8
+    links in a `videoUrls` list. This is the last resort before giving up.
+    """
+    try:
+        resp = _request_session().get(url, timeout=30)
+    except Exception:  # noqa: BLE001 - a failed scrape is just "no fallback"
+        return None
+    if resp.status_code >= 400:
+        return None
+    html = resp.text or ""
+    if not html:
+        return None
+    # JSON embedded in <script> escapes its slashes: https:\/\/host\/file.mp4
+    text = html.replace("\\/", "/").replace("\\u002F", "/").replace("\\u002f", "/")
+
+    found = []  # (url, is_hls)
+
+    # Pinterest: "videos":{"videoUrls":["....mp4","....m3u8"]}
+    for block in re.findall(r'"videoUrls"\s*:\s*\[(.*?)\]', text, re.S):
+        for u in re.findall(r'"(https?://[^"]+)"', block):
+            found.append((u, ".m3u8" in u.lower()))
+    # Threads / Instagram-style payloads
+    for u in re.findall(r'"video_url"\s*:\s*"(https?://[^"]+)"', text):
+        found.append((u, ".m3u8" in u.lower()))
+    # <meta property="og:video"> and twitter:player:stream
+    for tag in re.findall(r"<meta\b[^>]*>", text, re.I):
+        if re.search(r"og:video|twitter:player:stream", tag, re.I):
+            m = re.search(r'content=["\']([^"\']+)["\']', tag, re.I)
+            if m:
+                found.append((m.group(1), ".m3u8" in m.group(1).lower()))
+    # <video src> / <source src>
+    for u in re.findall(r'<(?:video|source)\b[^>]*\bsrc=["\']([^"\']+)["\']', text, re.I):
+        found.append((u, ".m3u8" in u.lower()))
+    # JSON-LD contentUrl
+    for u in re.findall(r'"contentUrl"\s*:\s*"(https?://[^"]+)"', text):
+        found.append((u, ".m3u8" in u.lower()))
+
+    formats, seen = [], set()
+    for raw, is_hls in found:
+        u = _html_unescape(raw)
+        if not u.lower().startswith("http") or u in seen:
+            continue
+        if _HTML_IMAGE_EXT.search(u):
+            continue
+        # A DASH manifest (.mpd) is not something this app can stream or merge.
+        if u.lower().split("?")[0].endswith(".mpd"):
+            continue
+        # Require a media extension: player page URLs look like streams but are
+        # HTML, and downloading one just saves a web page.
+        if not _HTML_MEDIA_EXT.search(u):
+            continue
+        seen.add(u)
+        # Pinterest names the tier in the path: /videos/mc/720p/<hash>.mp4
+        height = None
+        m = re.search(r"/(\d{3,4})p/", u)
+        if m:
+            height = int(m.group(1))
+        label = f"{height}p MP4" if height else ("HLS MP4" if is_hls else "MP4")
+        formats.append({
+            "format_id": f"html-{len(formats)}",
+            "url": u,
+            "ext": "mp4",
+            "format_note": label,
+            "protocol": "m3u8_native" if is_hls else "https",
+            # Reported as a progressive track: these URLs carry both streams.
+            "vcodec": "avc1", "acodec": "aac",
+            "width": None, "height": height, "fps": None, "abr": None,
+            "filesize": None,
+        })
+    if not formats:
+        return None
+    # A plain MP4 plays and downloads more simply than an HLS manifest, so it
+    # sorts first.
+    formats.sort(key=lambda f: 1 if f["protocol"].startswith("m3u8") else 0)
+    return {
+        "title": _html_title(text) or "Video",
+        "thumbnail": _html_og_image(text),
+        "formats": formats,
+        "extractor": "html-fallback",
+    }
+
+
+# Threads answers every crawler with its login page, so no extractor can read a
+# post without a session. Say that plainly instead of "unsupported site".
+_PLATFORM_HINTS = {
+    "threads": ("Threads only serves posts to a signed-in session. Add a "
+                "cookies.txt via the SOCIAL_COOKIES setting and try again."),
+}
+
+
+def _with_platform_hint(url: str, message: str) -> str:
+    hint = _PLATFORM_HINTS.get(detect_platform(url))
+    return hint or message
 
 
 def _pick_thumbnail(info: dict) -> str:
@@ -1506,7 +1646,7 @@ def social_extract(url: str) -> dict:
     best_video = next((f for f in reversed(deduped) if f["kind"] == "video"), None)
     best_audio = next((f for f in reversed(deduped) if f["kind"] == "audio"), None)
 
-    default = best_progressive or best_video or deduped[-1]
+    default = best_progressive or best_video or (deduped[-1] if deduped else None)
 
     return {
         "url": url,
