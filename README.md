@@ -81,6 +81,21 @@ the service awake and counts as the inbound traffic Render requires.
 Without the pinger the URL still works, but the first request after an idle
 spell waits about a minute while the service spins back up.
 
+#### Deploying with the API instead of the dashboard
+
+The Render dashboard cannot be automated: it is behind a login and an hCaptcha.
+The API can. `deploy_render.py` creates the service from the repository's
+`render.yaml` equivalent in one call:
+
+```bash
+RENDER_API_KEY=rnd_xxx python3 deploy_render.py --dry-run   # print the request
+RENDER_API_KEY=rnd_xxx python3 deploy_render.py --watch     # create and wait
+```
+
+The key comes from <https://dashboard.render.com/u/settings#api-keys> and is
+read from the environment only. A `402` from the API means Render wants payment
+details on that account; the free plan itself does not ask for them.
+
 ### Why not Vercel or Netlify
 
 Both are built for short, stateless requests, and this app is the opposite, so
