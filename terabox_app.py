@@ -853,38 +853,184 @@ def api_hls():
 # pieces, mux them, and hand back the finished file.
 # ---------------------------------------------------------------------------
 
-# Each entry: key, display name, brand colour, and a host matcher.
+# Each entry: key, display name, brand colour, 2-letter badge, and a host matcher.
+# yt-dlp backs every entry; the list drives the badge and host detection, and
+# its generic extractor still covers sites that are not named here.
 SOCIAL_PLATFORMS = (
-    ("youtube",   "YouTube",    "#ff0033", ("youtube.com", "youtu.be", "youtube-nocookie.com")),
-    ("instagram", "Instagram",  "#e1306c", ("instagram.com", "instagr.am")),
-    ("facebook",  "Facebook",   "#1877f2", ("facebook.com", "fb.watch", "fb.com")),
-    ("tiktok",    "TikTok",     "#00f2ea", ("tiktok.com",)),
-    ("twitter",   "X (Twitter)","#e7e9ea", ("twitter.com", "x.com", "t.co")),
-    ("whatsapp",  "WhatsApp",   "#25d366", ("whatsapp.com", "wa.me")),
-    ("snapchat",  "Snapchat",   "#fffc00", ("snapchat.com",)),
-    ("linkedin",  "LinkedIn",   "#0a66c2", ("linkedin.com", "lnkd.in")),
-    ("pinterest", "Pinterest",  "#e60023", ("pinterest.com", "pin.it")),
-    ("reddit",    "Reddit",     "#ff4500", ("reddit.com", "redd.it")),
-    ("threads",   "Threads",    "#e7e9ea", ("threads.net", "threads.com")),
-    ("telegram",  "Telegram",   "#2aabee", ("t.me", "telegram.me", "telegram.org")),
-    ("vimeo",     "Vimeo",      "#1ab7ea", ("vimeo.com",)),
-    ("dailymotion","Dailymotion","#00aaff", ("dailymotion.com", "dai.ly")),
-    ("twitch",    "Twitch",     "#9146ff", ("twitch.tv",)),
-    ("tumblr",    "Tumblr",     "#36465d", ("tumblr.com",)),
-    ("soundcloud","SoundCloud", "#ff5500", ("soundcloud.com",)),
-    ("bilibili",  "Bilibili",   "#fb7299", ("bilibili.com", "b23.tv")),
-    ("rumble",    "Rumble",     "#85c742", ("rumble.com",)),
-    ("odysee",    "Odysee",     "#ef1970", ("odysee.com", "lbry.tv")),
-    ("streamable","Streamable", "#0f90fa", ("streamable.com",)),
-    ("imgur",     "Imgur",      "#1bb76e", ("imgur.com",)),
-    ("likee",     "Likee",      "#ff0050", ("likee.video",)),
-    ("kwai",      "Kwai",       "#ff5000", ("kwai.com", "kwai-video.com")),
-    ("triller",   "Triller",    "#ff2b2b", ("triller.co",)),
-    ("coub",      "Coub",       "#f56c2d", ("coub.com",)),
-    ("mixcloud",  "Mixcloud",   "#5000ff", ("mixcloud.com",)),
-    ("bandcamp",  "Bandcamp",   "#629aa9", ("bandcamp.com",)),
-    ("9gag",      "9GAG",       "#000000", ("9gag.com",)),
-    ("other",     "Other link", "#8b93a7", ()),
+    # --- Global social & short video ---
+    ("youtube",     "YouTube",       "#ff0033", "YT", ("youtube.com", "youtu.be", "youtube-nocookie.com")),
+    ("instagram",   "Instagram",     "#e1306c", "IG", ("instagram.com", "instagr.am")),
+    ("facebook",    "Facebook",      "#1877f2", "FB", ("facebook.com", "fb.watch", "fb.com")),
+    ("tiktok",      "TikTok",        "#00f2ea", "TT", ("tiktok.com",)),
+    ("twitter",     "X (Twitter)",   "#e7e9ea", "X",  ("twitter.com", "x.com", "t.co")),
+    ("whatsapp",    "WhatsApp",      "#25d366", "WA", ("whatsapp.com", "wa.me")),
+    ("snapchat",    "Snapchat",      "#fffc00", "SC", ("snapchat.com",)),
+    ("linkedin",    "LinkedIn",      "#0a66c2", "IN", ("linkedin.com", "lnkd.in")),
+    ("pinterest",   "Pinterest",     "#e60023", "PT", ("pinterest.com", "pin.it")),
+    ("reddit",      "Reddit",        "#ff4500", "RD", ("reddit.com", "redd.it")),
+    ("threads",     "Threads",       "#e7e9ea", "TH", ("threads.net", "threads.com")),
+    ("telegram",    "Telegram",      "#2aabee", "TG", ("t.me", "telegram.me", "telegram.org")),
+    ("bluesky",     "Bluesky",       "#0085ff", "BS", ("bsky.app", "bsky.social")),
+    ("mastodon",    "Mastodon",      "#6364ff", "MO", ("mastodon.social", "mastodon.online", "mstdn.social")),
+    ("truthsocial", "Truth Social",  "#5442ba", "TS", ("truthsocial.com",)),
+    ("gettr",       "GETTR",         "#ff0000", "GT", ("gettr.com",)),
+    ("parler",      "Parler",        "#be1e2d", "PR", ("parler.com",)),
+    ("gab",         "Gab",           "#21cf7a", "GB", ("gab.com", "gab.ai")),
+    ("locals",      "Locals",        "#ff6b00", "LC", ("locals.com",)),
+    ("mewe",        "MeWe",          "#0076d3", "ME", ("mewe.com",)),
+    ("minds",       "Minds",         "#f2f2f2", "MN", ("minds.com",)),
+    ("wechat",      "WeChat",        "#07c160", "WC", ("wechat.com", "mp.weixin.qq.com")),
+    ("line",        "LINE",          "#00c300", "LN", ("line.me",)),
+    ("viber",       "Viber",         "#7360f2", "VB", ("viber.com",)),
+    ("signal",      "Signal",        "#3a76f0", "SG", ("signal.org",)),
+
+    # --- Video platforms ---
+    ("vimeo",       "Vimeo",         "#1ab7ea", "VM", ("vimeo.com",)),
+    ("dailymotion", "Dailymotion",   "#00aaff", "DM", ("dailymotion.com", "dai.ly")),
+    ("twitch",      "Twitch",        "#9146ff", "TW", ("twitch.tv",)),
+    ("kick",        "Kick",          "#53fc18", "KK", ("kick.com",)),
+    ("trovo",       "Trovo",         "#1eea6c", "TO", ("trovo.live",)),
+    ("dlive",       "DLive",         "#ffd800", "DL", ("dlive.tv",)),
+    ("rumble",      "Rumble",        "#85c742", "RU", ("rumble.com",)),
+    ("odysee",      "Odysee",        "#ef1970", "OD", ("odysee.com", "lbry.tv")),
+    ("dtube",       "DTube",         "#1f8ceb", "DT", ("d.tube",)),
+    ("peertube",    "PeerTube",      "#f1680d", "PE", ("peertube.tv", "framatube.org")),
+    ("bitchute",    "BitChute",      "#d40000", "BT", ("bitchute.com",)),
+    ("brighteon",   "Brighteon",     "#f5a623", "BN", ("brighteon.com",)),
+    ("metacafe",    "Metacafe",      "#f7c600", "MC", ("metacafe.com",)),
+    ("break",       "Break",         "#00a0e9", "BK", ("break.com",)),
+    ("veoh",        "Veoh",          "#5e6f8f", "VH", ("veoh.com",)),
+    ("clipfish",    "Clipfish",      "#e2001a", "CF", ("clipfish.de",)),
+    ("myvideo",     "MyVideo",       "#f7b500", "MV", ("myvideo.de",)),
+    ("vevo",        "Vevo",          "#ff0033", "VO", ("vevo.com",)),
+    ("streamable",  "Streamable",    "#0f90fa", "ST", ("streamable.com",)),
+    ("archive",     "Internet Archive","#000000","AR", ("archive.org",)),
+    ("loom",        "Loom",          "#625df5", "LO", ("loom.com",)),
+    ("wistia",      "Wistia",        "#54bbff", "WI", ("wistia.com", "wi.st")),
+    ("vidyard",     "Vidyard",       "#3f3fbf", "VY", ("vidyard.com",)),
+    ("bilibili",    "Bilibili",      "#fb7299", "BI", ("bilibili.com", "b23.tv")),
+    ("niconico",    "Niconico",      "#252525", "NC", ("nicovideo.jp", "nico.ms")),
+    ("abema",       "ABEMA",         "#00a2ff", "AB", ("abema.tv",)),
+    ("dmm",         "DMM",           "#1a1a1a", "DD", ("dmm.co.jp", "dmm.com")),
+    ("youku",       "Youku",         "#1b9cfc", "YK", ("youku.com", "youku.tv")),
+    ("tudou",       "Tudou",         "#ff6600", "TD", ("tudou.com",)),
+    ("iqiyi",       "iQIYI",         "#00cc36", "IQ", ("iqiyi.com", "iq.com")),
+    ("douyin",      "Douyin",        "#fe2c55", "DY", ("douyin.com",)),
+    ("weibo",       "Weibo",         "#e6162d", "WB", ("weibo.com", "weibo.cn")),
+    ("miaopai",     "Miaopai",       "#ffcc00", "MP", ("miaopai.com",)),
+    ("huya",        "Huya",          "#ff7d00", "HY", ("huya.com",)),
+    ("douyu",       "Douyu",         "#ff5d23", "DO", ("douyu.com", "douyu.tv")),
+    ("acfun",       "AcFun",         "#fd4c5b", "AC", ("acfun.cn",)),
+    ("xigua",       "Xigua",         "#f04142", "XG", ("ixigua.com", "xigua.com")),
+    ("tencent",     "Tencent Video", "#0052d9", "TX", ("v.qq.com",)),
+    ("mgtv",        "MGTV",          "#ff6d00", "MG", ("mgtv.com",)),
+    ("naver",       "Naver TV",      "#03c75a", "NV", ("naver.com", "tv.naver.com")),
+    ("kakao",       "Kakao TV",      "#ffcd00", "KA", ("kakao.com", "tv.kakao.com")),
+    ("afreeca",     "AfreecaTV",     "#00b1e5", "AF", ("afreecatv.com", "soop.co.kr")),
+
+    # --- Music & audio ---
+    ("soundcloud",  "SoundCloud",    "#ff5500", "SC", ("soundcloud.com",)),
+    ("mixcloud",    "Mixcloud",      "#5000ff", "MX", ("mixcloud.com",)),
+    ("bandcamp",    "Bandcamp",      "#629aa9", "BC", ("bandcamp.com",)),
+    ("audiomack",   "Audiomack",     "#ffa200", "AM", ("audiomack.com",)),
+    ("deezer",      "Deezer",        "#a238ff", "DE", ("deezer.com",)),
+    ("tidal",       "Tidal",         "#000000", "TI", ("tidal.com",)),
+    ("audius",      "Audius",        "#7e1bcc", "AU", ("audius.co",)),
+    ("jamendo",     "Jamendo",       "#f6a623", "JM", ("jamendo.com",)),
+    ("lastfm",      "Last.fm",       "#d51007", "LF", ("last.fm",)),
+    ("iheart",      "iHeartRadio",   "#c6002b", "IH", ("iheart.com", "iheartradio.com")),
+    ("siriusxm",    "SiriusXM",      "#000000", "SX", ("siriusxm.com",)),
+    ("pandora",     "Pandora",       "#3668ff", "PD", ("pandora.com",)),
+    ("napster",     "Napster",       "#0066ff", "NP", ("napster.com",)),
+    ("tumblr",      "Tumblr",        "#36465d", "TU", ("tumblr.com",)),
+
+    # --- Images & art ---
+    ("imgur",       "Imgur",         "#1bb76e", "IM", ("imgur.com",)),
+    ("flickr",      "Flickr",        "#0063dc", "FL", ("flickr.com",)),
+    ("unsplash",    "Unsplash",      "#000000", "UN", ("unsplash.com",)),
+    ("500px",       "500px",         "#0099e5", "5P", ("500px.com",)),
+    ("deviantart",  "DeviantArt",    "#05cc47", "DA", ("deviantart.com",)),
+    ("pixiv",       "Pixiv",         "#0096fa", "PX", ("pixiv.net",)),
+    ("behance",     "Behance",       "#1769ff", "BE", ("behance.net",)),
+    ("dribbble",    "Dribbble",      "#ea4c89", "DR", ("dribbble.com",)),
+    ("artstation",  "ArtStation",    "#13aff0", "AS", ("artstation.com",)),
+    ("giphy",       "Giphy",         "#000000", "GY", ("giphy.com",)),
+    ("tenor",       "Tenor",         "#0073ff", "TN", ("tenor.com",)),
+
+    # --- Short video apps ---
+    ("likee",       "Likee",         "#ff0050", "LK", ("likee.video",)),
+    ("kwai",        "Kwai",          "#ff5000", "KW", ("kwai.com", "kwai-video.com")),
+    ("triller",     "Triller",       "#ff2b2b", "TR", ("triller.co",)),
+    ("coub",        "Coub",          "#f56c2d", "CO", ("coub.com",)),
+    ("clash",       "Clash",         "#f5c400", "CL", ("clashapp.co",)),
+    ("funimate",    "Funimate",      "#ff2f92", "FM", ("funimate.com",)),
+    ("tiki",        "Tiki",          "#ff4b4b", "TK", ("tiki.vn",)),
+    ("moj",         "Moj",           "#000000", "MJ", ("mojvideo.com",)),
+    ("bigo",        "Bigo Live",     "#00e0ff", "BO", ("bigo.tv",)),
+    ("younow",      "YouNow",        "#1b9cfc", "YN", ("younow.com",)),
+    ("9gag",        "9GAG",          "#000000", "9G", ("9gag.com",)),
+
+    # --- Anime & streaming ---
+    ("crunchyroll", "Crunchyroll",   "#f47521", "CR", ("crunchyroll.com",)),
+    ("funimation",  "Funimation",    "#5b0bb5", "FN", ("funimation.com",)),
+    ("hidive",      "HIDIVE",        "#00aeef", "HD", ("hidive.com",)),
+    ("vrv",         "VRV",           "#f96854", "VR", ("vrv.co",)),
+
+    # --- News, sports & entertainment ---
+    ("bbc",         "BBC",           "#bb1919", "BB", ("bbc.com", "bbc.co.uk")),
+    ("cnn",         "CNN",           "#cc0000", "CN", ("cnn.com",)),
+    ("bloomberg",   "Bloomberg",     "#000000", "BL", ("bloomberg.com",)),
+    ("reuters",     "Reuters",       "#ff8000", "RE", ("reuters.com",)),
+    ("aljazeera",   "Al Jazeera",    "#fa9000", "AJ", ("aljazeera.com",)),
+    ("msnbc",       "MSNBC",         "#1e4d90", "MS", ("msnbc.com",)),
+    ("cbs",         "CBS",           "#1c60a5", "CB", ("cbsnews.com", "cbs.com")),
+    ("nbc",         "NBC",           "#7d5ebe", "NB", ("nbc.com", "nbcnews.com")),
+    ("pbs",         "PBS",           "#2638c4", "PB", ("pbs.org",)),
+    ("hbo",         "HBO / Max",     "#000000", "HB", ("hbo.com", "max.com")),
+    ("discovery",   "Discovery",     "#00a0df", "DC", ("discovery.com",)),
+    ("natgeo",      "Nat Geo",       "#ffcc00", "NG", ("nationalgeographic.com",)),
+    ("mtv",         "MTV",           "#ff0000", "MT", ("mtv.com",)),
+    ("comedycentral","Comedy Central","#f9d423","CM", ("cc.com", "comedycentral.com")),
+    ("nick",        "Nickelodeon",   "#ff8000", "NK", ("nick.com", "nickelodeon.com")),
+    ("cartoonnetwork","Cartoon Network","#000000","CT",("cartoonnetwork.com",)),
+    ("buzzfeed",    "BuzzFeed",      "#ee3322", "BZ", ("buzzfeed.com",)),
+    ("vice",        "Vice",          "#000000", "VC", ("vice.com",)),
+    ("vox",         "Vox",           "#000000", "VX", ("vox.com",)),
+    ("nowthis",     "NowThis",       "#e62b1e", "NT", ("nowthisnews.com",)),
+    ("ted",         "TED",           "#e62b1e", "TE", ("ted.com",)),
+    ("nba",         "NBA",           "#1d428a", "NA", ("nba.com",)),
+    ("nfl",         "NFL",           "#013369", "NF", ("nfl.com",)),
+    ("mlb",         "MLB",           "#041e42", "ML", ("mlb.com",)),
+    ("nhl",         "NHL",           "#000000", "NH", ("nhl.com",)),
+    ("espn",        "ESPN",          "#c8102e", "ES", ("espn.com", "espn.co.uk")),
+    ("dazn",        "DAZN",          "#0b0b0b", "DN", ("dazn.com",)),
+
+    # --- Learning & courses ---
+    ("khanacademy","Khan Academy",   "#14bf96", "KH", ("khanacademy.org",)),
+    ("coursera",    "Coursera",      "#0056d2", "CS", ("coursera.org",)),
+    ("udemy",       "Udemy",         "#a435f0", "UD", ("udemy.com",)),
+    ("edx",         "edX",           "#02262b", "EX", ("edx.org",)),
+    ("skillshare",  "Skillshare",    "#00ff84", "SK", ("skillshare.com",)),
+    ("masterclass", "MasterClass",   "#000000", "MA", ("masterclass.com",)),
+    ("pluralsight", "Pluralsight",   "#f15b2a", "PL", ("pluralsight.com",)),
+    ("udacity",     "Udacity",       "#02b3e4", "UC", ("udacity.com",)),
+    ("futurelearn", "FutureLearn",   "#de00a5", "FU", ("futurelearn.com",)),
+    ("codecademy",  "Codecademy",    "#1f4056", "CC", ("codecademy.com",)),
+
+    # --- Creator, community & commerce ---
+    ("patreon",     "Patreon",       "#f96854", "PA", ("patreon.com",)),
+    ("substack",    "Substack",      "#ff6719", "SS", ("substack.com",)),
+    ("medium",      "Medium",        "#000000", "MD", ("medium.com",)),
+    ("wordpress",   "WordPress",     "#21759b", "WP", ("wordpress.com", "wordpress.org")),
+    ("blogger",     "Blogger",       "#ff5722", "BG", ("blogspot.com", "blogger.com")),
+    ("amazon",      "Amazon",        "#ff9900", "AZ", ("amazon.com", "amazon.in", "amazon.co.uk")),
+    ("ebay",        "eBay",          "#e53238", "EB", ("ebay.com",)),
+    ("etsy",        "Etsy",          "#f16521", "ET", ("etsy.com",)),
+    ("aliexpress",  "AliExpress",    "#ff4747", "AX", ("aliexpress.com",)),
+    ("alibaba",     "Alibaba",       "#ff6a00", "AL", ("alibaba.com",)),
+    ("shopify",     "Shopify",       "#95bf47", "SH", ("shopify.com",)),
+
+    ("other",       "Other link",    "#8b93a7", "?",  ()),
 )
 
 _SOCIAL_BY_KEY = {p[0]: p for p in SOCIAL_PLATFORMS}
@@ -898,14 +1044,15 @@ def _host_matches(host: str, roots) -> bool:
 def detect_platform(url: str) -> str:
     """Return the platform key for a URL, or 'other'."""
     host = urllib.parse.urlparse(url).hostname or ""
-    for key, _name, _color, roots in SOCIAL_PLATFORMS:
+    for key, _name, _color, _badge, roots in SOCIAL_PLATFORMS:
         if roots and _host_matches(host, roots):
             return key
     return "other"
 
 
 def social_platform_list() -> list:
-    return [{"key": k, "name": n, "color": c} for k, n, c, _r in SOCIAL_PLATFORMS]
+    return [{"key": k, "name": n, "color": c, "badge": b}
+            for k, n, c, b, _r in SOCIAL_PLATFORMS]
 
 
 def _ytdlp_available() -> bool:
@@ -1720,6 +1867,16 @@ INDEX_HTML = """<!doctype html>
         font-size:.62rem;font-weight:800;color:#fff;}
   .plat .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .platnote{color:var(--muted-2);font-size:.72rem;margin-top:9px;}
+  .platsearch{width:100%;padding:9px 12px;margin-bottom:10px;border:1px solid var(--border);
+        border-radius:9px;background:var(--bg-2);color:var(--text);font-size:.82rem;outline:none;transition:.15s;}
+  .platsearch::placeholder{color:var(--muted-2);}
+  .platsearch:focus{border-color:var(--primary);box-shadow:var(--focus);}
+  /* A long list stays usable: cap its height and let it scroll. */
+  #platforms{max-height:420px;overflow-y:auto;padding-right:4px;scrollbar-width:thin;
+        scrollbar-color:var(--border-2) transparent;}
+  #platforms::-webkit-scrollbar{width:8px;}
+  #platforms::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:8px;}
+  #platforms::-webkit-scrollbar-track{background:transparent;}
   .result{display:flex;gap:16px;align-items:center;}
   .rthumb{width:150px;height:86px;flex-shrink:0;border-radius:12px;overflow:hidden;background:var(--surface-2);
         border:1px solid var(--border);display:flex;align-items:center;justify-content:center;}
@@ -1956,8 +2113,9 @@ INDEX_HTML = """<!doctype html>
         <div class="card platwrap">
           <div class="plathead">
             <span>Supported platforms</span>
-            <span class="platcount" id="platCount">30+</span>
+            <span class="platcount" id="platCount">160+</span>
           </div>
+          <input id="platSearch" class="platsearch" type="text" placeholder="Search platforms..." autocomplete="off">
           <div id="platforms" class="platforms"></div>
           <div class="platnote">Tap a platform to copy its name into the box, then paste the full link.</div>
         </div>
@@ -2909,22 +3067,15 @@ pasteBtn.addEventListener('click', async () => {
 histClearBtn.addEventListener('click', () => { saveHistory([]); renderHistory(); });
 
 // --- Social downloader -----------------------------------------------------
-const S_PLAT = {
-  youtube:{c:'#ff0033',t:'YT'}, instagram:{c:'#e1306c',t:'IG'}, facebook:{c:'#1877f2',t:'FB'},
-  tiktok:{c:'#00f2ea',t:'TT'}, twitter:{c:'#4b5563',t:'X'}, whatsapp:{c:'#25d366',t:'WA'},
-  snapchat:{c:'#c9b400',t:'SC'}, linkedin:{c:'#0a66c2',t:'IN'}, pinterest:{c:'#e60023',t:'PT'},
-  reddit:{c:'#ff4500',t:'RD'}, threads:{c:'#4b5563',t:'TH'}, telegram:{c:'#2aabee',t:'TG'},
-  vimeo:{c:'#1ab7ea',t:'VM'}, dailymotion:{c:'#00aaff',t:'DM'}, twitch:{c:'#9146ff',t:'TW'},
-  tumblr:{c:'#36465d',t:'TU'}, soundcloud:{c:'#ff5500',t:'SC'}, bilibili:{c:'#fb7299',t:'BI'},
-  rumble:{c:'#85c742',t:'RU'}, odysee:{c:'#ef1970',t:'OD'}, streamable:{c:'#0f90fa',t:'ST'},
-  imgur:{c:'#1bb76e',t:'IM'}, likee:{c:'#ff0050',t:'LK'}, kwai:{c:'#ff5000',t:'KW'},
-  triller:{c:'#ff2b2b',t:'TR'}, coub:{c:'#f56c2d',t:'CO'}, mixcloud:{c:'#5000ff',t:'MX'},
-  bandcamp:{c:'#629aa9',t:'BC'}, '9gag':{c:'#6b7280',t:'9G'}, other:{c:'#8b93a7',t:'?'},
-};
+// Badge map is filled from /api/social/platforms so the client never drifts
+// from the server's list; 'other' is the only entry needed up front.
+const S_PLAT = { other:{c:'#8b93a7',t:'?'} };
 const sLinkEl = $('sLink'), sFetchBtn = $('sFetch'), sClearBtn = $('sClear');
 const sPasteBtn = $('sPaste'), sStatusEl = $('sStatus');
 const sResult = $('sResult'), sThumb = $('sThumb'), sTitle = $('sTitle'), sSub = $('sSub'), sTags = $('sTags');
 const sFormats = $('sFormats'), platformsEl = $('platforms'), platCountEl = $('platCount');
+const platSearchEl = $('platSearch');
+platSearchEl.addEventListener('input', () => renderPlatforms(allPlatforms));
 let socialMedia = null;
 
 function sSetStatus(msg, isError){ sStatusEl.textContent = msg || ''; sStatusEl.className = 'status' + (isError ? ' error' : ''); }
@@ -2939,10 +3090,19 @@ function platBadge(key){
   const p = S_PLAT[key] || S_PLAT.other;
   return '<span class="pd" style="background:' + p.c + '">' + p.t + '</span>';
 }
+let allPlatforms = [];
 function renderPlatforms(list){
+  allPlatforms = list;
+  const q = (platSearchEl.value || '').trim().toLowerCase();
+  const shown = q ? list.filter(p => p.name.toLowerCase().includes(q)) : list;
   platformsEl.innerHTML = '';
-  platCountEl.textContent = list.length + ' sites';
-  for (const p of list) {
+  platCountEl.textContent = (q ? shown.length + ' / ' : '') + list.length + ' sites';
+  if (!shown.length) {
+    platformsEl.innerHTML = '<div class="empty">No platform matches "' + esc(q) + '".</div>';
+    return;
+  }
+  for (const p of shown) {
+    S_PLAT[p.key] = {c: p.color, t: p.badge || (p.name || '?').slice(0, 2).toUpperCase()};
     const b = document.createElement('button');
     b.className = 'plat';
     b.dataset.key = p.key;

@@ -62,6 +62,12 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
 
 ## Social downloader facts (measured)
 
+- `SOCIAL_PLATFORMS` in `terabox_app.py` lists ~156 sites as
+  `(key, name, colour, badge, host_roots)`. It drives host detection and the UI
+  picker; yt-dlp's generic extractor covers anything not listed. The client's
+  `S_PLAT` badge map is built from `/api/social/platforms` at load time, so add a
+  site by editing only the Python tuple.
+
 - `_extract_info(url) -> (info, cookies)` runs yt-dlp and returns the info dict
   plus the extractor's cookie jar. The cookies matter: **TikTok signs its media
   URLs against yt-dlp's session cookies**, so they are threaded through

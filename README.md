@@ -3,9 +3,11 @@
 A single-file web app by **Tech Arslan Software Solutions** with two tools in one
 page:
 
-- **Social Downloader** — paste a link from YouTube, Instagram, Facebook, TikTok,
-  X, Dailymotion, Vimeo and ~25 more sites; play it in the browser or save it as
-  an MP4.
+- **Social Downloader** — paste a link from any of **156 named sites** (YouTube,
+  Instagram, Facebook, TikTok, X, Dailymotion, Vimeo, SoundCloud, Twitch, Bilibili
+  and many more), with a searchable platform picker; play it in the browser or
+  save it as an MP4. yt-dlp's generic extractor still covers sites that are not
+  named, so the "Other link" option works for them too.
 - **TeraBox** — resolve a public TeraBox share link, list its files, play videos
   in the browser, and download them.
 
