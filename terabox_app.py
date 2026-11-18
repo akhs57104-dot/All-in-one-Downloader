@@ -955,14 +955,12 @@ INDEX_HTML = """<!doctype html>
   .empty{color:var(--muted-2);font-size:.83rem;padding:26px 12px;text-align:center;border:1px dashed var(--border);
          border-radius:var(--radius-sm);}
 
-  /* player */
-  #player{position:fixed;inset:0;background:rgba(4,8,16,.9);backdrop-filter:blur(6px);display:flex;
-          align-items:center;justify-content:center;padding:16px;z-index:60;}
-  #player.full{padding:0;background:#000;backdrop-filter:none;}
-  .pbox{background:#080d18;border:1px solid var(--border);border-radius:16px;width:min(1080px,100%);
-        overflow-x:hidden;overflow-y:auto;box-shadow:0 30px 80px -20px rgba(0,0,0,.85);display:flex;flex-direction:column;
-        max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);}
-  .pbox.wide{width:min(1500px,100%);}
+  /* player: a full page, so the video gets the whole screen */
+  #player{position:fixed;inset:0;background:#04070d;display:flex;align-items:stretch;justify-content:center;
+          padding:0;z-index:60;}
+  #player.full{background:#000;}
+  .pbox{background:#080d18;width:100%;height:100%;overflow-x:hidden;overflow-y:auto;display:flex;flex-direction:column;}
+  .pbox.wide .phead,.pbox.wide .nextbar{display:none;}
   .phead{display:flex;align-items:center;gap:12px;padding:12px 15px;border-bottom:1px solid var(--border);
          background:linear-gradient(180deg,#0d1526,#0a1120);flex-shrink:0;}
   .ptitle{flex:1;min-width:0;display:flex;align-items:center;gap:10px;}
@@ -972,8 +970,8 @@ INDEX_HTML = """<!doctype html>
   .tag.preview{color:#fde68a;border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.14);}
   .phead-actions{display:flex;gap:8px;flex-shrink:0;}
   .stage{position:relative;background:#000;display:flex;align-items:center;justify-content:center;
-         overflow:hidden;min-height:0;}
-  .stage video{width:100%;display:block;background:#000;max-height:66vh;object-fit:contain;
+         overflow:hidden;flex:1;min-height:0;}
+  .stage video{width:100%;height:100%;display:block;background:#000;object-fit:contain;
          transition:transform .2s ease;}
   /* The idle video stays in the layout but invisible, so a prefetched stream
      buffers at the real display size without covering the one being watched. */
@@ -1041,15 +1039,9 @@ INDEX_HTML = """<!doctype html>
   .nextlist{display:flex;flex-wrap:wrap;gap:6px;max-height:120px;overflow:auto;}
   .nextlist .act{font-size:.74rem;padding:6px 11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
-  /* fullscreen: fill the screen and fit the video on desktop and mobile */
-  #player:fullscreen,#player:-webkit-full-screen{padding:0;background:#000;backdrop-filter:none;}
-  #player.full .pbox,#player:fullscreen .pbox,#player:-webkit-full-screen .pbox{
-        width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:100vh;max-height:100dvh;
-        border-radius:0;border:0;}
+  /* fullscreen / theater: hide the chrome so the video fills the screen */
+  #player:fullscreen,#player:-webkit-full-screen{background:#000;}
   #player.full .phead,#player:fullscreen .phead,#player:-webkit-full-screen .phead{display:none;}
-  #player.full .stage,#player:fullscreen .stage,#player:-webkit-full-screen .stage{flex:1;}
-  #player.full .stage video,#player:fullscreen .stage video,#player:-webkit-full-screen .stage video{
-        height:100%;max-height:none;}
   #player.full .pmsg,#player:fullscreen .pmsg,#player:-webkit-full-screen .pmsg{display:none;}
   #player.full .nextbar,#player:fullscreen .nextbar,#player:-webkit-full-screen .nextbar{display:none;}
 
@@ -1064,6 +1056,7 @@ INDEX_HTML = """<!doctype html>
   .kbd{background:var(--surface-2);border:1px solid var(--border-2);border-bottom-width:2px;border-radius:6px;
        padding:2px 8px;font-size:.72rem;font-weight:700;color:var(--text);font-family:ui-monospace,Menlo,monospace;}
   .hidden{display:none !important;}
+  body.playing{overflow:hidden;}
 
   @media (max-width:620px){
     .keys{grid-template-columns:1fr;}
@@ -1071,13 +1064,12 @@ INDEX_HTML = """<!doctype html>
     .actions{width:100%;justify-content:flex-start;}
     .time{min-width:auto;}
     .brand h1{font-size:1.06rem;}
-    .stage video{max-height:52vh;}
     .phead{padding:10px 12px;}
     .ptitle .t{font-size:.82rem;}
     .cbtn{width:34px;height:34px;}
     .cbtn.big{width:40px;height:40px;}
-    .time{min-width:auto;}
     .controls{padding:8px 10px 10px;gap:5px;}
+    .nextbar{padding:9px 11px 11px;}
   }
 </style>
 </head>
@@ -1487,21 +1479,26 @@ function showControls(){
 }
 function applyRotation(){
   const deg = ((rotation % 360) + 360) % 360;
-  const w = activeVideo.offsetWidth, h = activeVideo.offsetHeight;
-  let tf = 'none';
-  if ((deg === 90 || deg === 270) && w && h) {
-    const s = Math.min(stage.clientWidth / h, stage.clientHeight / w);
-    tf = 'rotate(' + deg + 'deg) scale(' + s + ')';
-  } else if (deg) {
-    tf = 'rotate(' + deg + 'deg)';
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  if ((deg === 90 || deg === 270) && sw && sh) {
+    // Swap the box to the stage's opposite sides so the rotated video fills
+    // the screen instead of shrinking to fit inside the upright box.
+    activeVideo.style.width = sh + 'px';
+    activeVideo.style.height = sw + 'px';
+    activeVideo.style.transform = 'rotate(' + deg + 'deg)';
+  } else {
+    activeVideo.style.width = '';
+    activeVideo.style.height = '';
+    activeVideo.style.transform = deg ? 'rotate(' + deg + 'deg)' : 'none';
   }
-  activeVideo.style.transform = tf;
 }
 function resetVideo(v){
   try { v.pause(); } catch (e) {}
   v.removeAttribute('src');
   try { v.load(); } catch (e) {}
   v.style.transform = 'none';
+  v.style.width = '';
+  v.style.height = '';
   v.classList.toggle('ghost', v !== activeVideo);
 }
 function setNextStatus(msg, kind){
@@ -1562,6 +1559,8 @@ async function openPlayer(f, link){
   playerTag.textContent = 'Full length';
   playerTag.classList.remove('hidden'); playerTag.classList.remove('preview');
   player.classList.remove('hidden');
+  document.body.classList.add('playing');
+  pushPlayerHistory();
   playerMsg.textContent = 'Preparing stream\u2026';
   playerMsg.classList.remove('error');
   showSpinner(true);
@@ -1713,7 +1712,18 @@ function activateNext(){
   showControls();
 }
 
-function closePlayer(){ tearDownPlayer(); player.classList.add('hidden'); playerMsg.textContent = ''; }
+function closePlayer(){
+  tearDownPlayer();
+  player.classList.add('hidden');
+  document.body.classList.remove('playing');
+  playerMsg.textContent = '';
+  if (playerOnHistory) {
+    // Drop the entry we pushed when the player opened, so Back and Close stay
+    // in sync and a second Back does not skip past the app.
+    playerOnHistory = false;
+    try { history.back(); } catch (e) {}
+  }
+}
 
 // video events -> UI (bound to both videos; only the active one drives the UI)
 function bindVideo(v){
@@ -1853,7 +1863,8 @@ window.addEventListener('orientationchange', () => setTimeout(applyRotation, 200
 
 $('btnDownloadTop').addEventListener('click', () => { if (currentFile) startDownload(currentFile, $('btnDownloadTop'), currentLink); });
 $('playerClose').addEventListener('click', closePlayer);
-player.addEventListener('click', e => { if (e.target === player) closePlayer(); });
+// No click-to-close on the backdrop: a stray tap outside the video used to
+// dismiss the player and stop playback.
 stage.addEventListener('mousemove', showControls);
 stage.addEventListener('touchstart', showControls, { passive: true });
 stage.addEventListener('click', e => {
@@ -1862,6 +1873,17 @@ stage.addEventListener('click', e => {
   }
 });
 stage.addEventListener('dblclick', e => { if (e.target === activeVideo || e.target === stage) toggleFullscreen(); });
+
+// The player opens as its own page: give it a history entry so the browser
+// Back button closes it instead of leaving the app.
+let playerOnHistory = false;
+function pushPlayerHistory(){
+  if (playerOnHistory) return;
+  try { history.pushState({ player: true }, '', '#play'); playerOnHistory = true; } catch (e) {}
+}
+window.addEventListener('popstate', () => {
+  if (playerOnHistory && !player.classList.contains('hidden')) { playerOnHistory = false; closePlayer(); }
+});
 
 // play-next wiring
 $('nextLoad').addEventListener('click', loadNext);
