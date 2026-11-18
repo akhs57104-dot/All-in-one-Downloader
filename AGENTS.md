@@ -15,6 +15,10 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
 - Dependencies: `flask`, `curl_cffi`, `yt-dlp` (`requirements.txt`). `ffmpeg`
   on `PATH` enables merged high-quality downloads; without it only single-file
   (progressive) formats are offered.
+- The container can be recycled between sessions, which empties
+  site-packages. If imports fail, re-run `pip install -r requirements.txt`
+  (plus `requests`, which the app falls back to) and
+  `sudo apt-get update && sudo apt-get install -y ffmpeg`.
 
 ## TeraBox API facts (measured)
 
