@@ -25,7 +25,6 @@ ENV HOME=/home/appuser
 
 EXPOSE 12000
 # One worker with threads: the app keeps token state in process memory.
-# Bind to $PORT when the host provides one, else 12000.
-# --no-control-socket: gunicorn >= 23 writes a control socket under $HOME,
-# which is not always writable in sandboxed hosts (Railway, Fly).
-CMD ["sh", "-c", "exec gunicorn --workers 1 --threads 8 --timeout 300 --no-control-socket --bind 0.0.0.0:${PORT:-12000} wsgi:app"]
+# start.sh binds to $PORT (falling back to 12000) and only passes
+# --no-control-socket when the installed gunicorn supports it.
+CMD ["./start.sh"]

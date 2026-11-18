@@ -1,6 +1,7 @@
-# Railway uses the Dockerfile (see railway.json). This file only matters if the
-# service is switched to the Nixpacks builder: it adds ffmpeg so yt-dlp can
-# merge separate video and audio tracks. Nixpacks auto-detects Python and reads
-# the Procfile for the start command.
+# Only relevant when Railway builds with Nixpacks instead of the Dockerfile
+# (railway.json pins DOCKERFILE, so this is a fallback). aptPkgs adds ffmpeg
+# without replacing the setup phase that installs Python; declaring nixPkgs
+# here instead would drop python3 and the build would fail with
+# "python: command not found".
 [phases.setup]
-nixPkgs = ["ffmpeg"]
+aptPkgs = ["ffmpeg"]

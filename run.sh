@@ -11,9 +11,7 @@ LOG="${LOG:-/tmp/techarslan.log}"
 
 while true; do
   echo "[run.sh] $(date -Is) starting gunicorn on :$PORT" >>"$LOG"
-  python3 -m gunicorn --workers 1 --threads 8 --timeout 300 \
-    --graceful-timeout 30 --no-control-socket --bind "0.0.0.0:$PORT" \
-    --access-logfile - --error-logfile - wsgi:app >>"$LOG" 2>&1
+  ./start.sh >>"$LOG" 2>&1
   code=$?
   echo "[run.sh] $(date -Is) gunicorn exited (code $code); restarting in 3s" >>"$LOG"
   sleep 3
