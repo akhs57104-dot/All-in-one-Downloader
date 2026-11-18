@@ -7,14 +7,25 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PORT=12000
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Normalise permissions and run as a non-root user. Some hosts (Railway, Fly)
+# run the container as an unprivileged uid; a 0600 file from a checkout would
+# otherwise fail with "Permission denied" while gunicorn boots the worker.
+RUN chmod -R a+rX /app \
+    && useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+ENV HOME=/home/appuser
+
 EXPOSE 12000
 # One worker with threads: the app keeps token state in process memory.
 # Bind to $PORT when the host provides one, else 12000.
-CMD ["sh", "-c", "exec gunicorn --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:${PORT:-12000} wsgi:app"]
+# --no-control-socket: gunicorn >= 23 writes a control socket under $HOME,
+# which is not always writable in sandboxed hosts (Railway, Fly).
+CMD ["sh", "-c", "exec gunicorn --workers 1 --threads 8 --timeout 300 --no-control-socket --bind 0.0.0.0:${PORT:-12000} wsgi:app"]

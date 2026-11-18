@@ -63,6 +63,31 @@ except ImportError:  # pragma: no cover - depends on the environment
 
 app = Flask(__name__)
 
+# Some sandboxes (Railway, Fly) start with no writable temp dir, so
+# tempfile.mkstemp() raises and gunicorn dies while booting the worker.
+# Pick the first writable candidate up front and point tempfile at it.
+def _ensure_writable_tempdir():
+    candidates = [tempfile.tempdir, os.environ.get("TMPDIR"), "/tmp",
+                  os.path.join(os.getcwd(), ".tmp")]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            os.makedirs(candidate, exist_ok=True)
+            probe = os.path.join(candidate, ".writable-probe")
+            with open(probe, "w"):
+                pass
+            os.remove(probe)
+        except OSError:
+            continue
+        os.environ["TMPDIR"] = candidate
+        tempfile.tempdir = candidate
+        return candidate
+    return None
+
+
+_ensure_writable_tempdir()
+
 # ---------------------------------------------------------------------------
 # TeraBox client
 # ---------------------------------------------------------------------------
