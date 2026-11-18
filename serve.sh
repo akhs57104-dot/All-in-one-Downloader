@@ -16,6 +16,7 @@ LOCAL="http://127.0.0.1:${PORT}"
 APP_LOG="${APP_LOG:-/tmp/techarslan.log}"
 TUNNEL_LOG="${TUNNEL_LOG:-/tmp/techarslan-tunnel.log}"
 URL_FILE="${URL_FILE:-/tmp/techarslan-url.txt}"
+STABLE_URL_FILE="${STABLE_URL_FILE:-/tmp/techarslan-stable-url.txt}"
 CLOUDFLARED="${CLOUDFLARED:-cloudflared}"
 STAMP="$(date -Is)"
 
@@ -63,7 +64,8 @@ start_tunnel() {
     url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$TUNNEL_LOG" | head -1)
     if [ -n "$url" ]; then
       printf '%s\n' "$url" >"$URL_FILE"
-      log "public URL: $url"
+      log "temporary public URL: $url"
+      log "note: a quick-tunnel URL changes every time the tunnel restarts"
       return 0
     fi
     sleep 1
@@ -74,6 +76,13 @@ start_tunnel() {
 log "starting (port $PORT, stamp $STAMP)"
 app_up || start_app || log "the app did not come up; will keep retrying"
 start_tunnel || log "the tunnel did not come up; will keep retrying"
+# The sandbox's own hostname is stable and outlives the tunnel, so it is the
+# preferred address; the quick-tunnel URL is written to a second file for
+# callers that cannot reach the hostname. Both serve the same local port.
+if [ -n "${PUBLIC_URL:-}" ]; then
+  printf '%s\n' "$PUBLIC_URL" >"$STABLE_URL_FILE"
+  log "stable public URL: $PUBLIC_URL"
+fi
 
 # Keep both alive. The app is restarted by run.sh itself, so here we only need
 # to notice when the tunnel goes away and hand out a fresh URL.

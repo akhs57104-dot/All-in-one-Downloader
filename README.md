@@ -93,6 +93,33 @@ neither can host it well:
 
 A long-running download server needs the Northflank or Render setup above.
 
+### Cloudflare - good tunnel, wrong product for hosting
+
+Cloudflare is the best *tunnel* here, and the worst *host*.
+
+**As a tunnel it is free and needs no account.** `./tunnel.sh` (or `serve.sh`)
+runs `cloudflared tunnel --url http://127.0.0.1:12000`, which prints a
+`https://<words>.trycloudflare.com` address. That address is a fresh one every
+time the tunnel restarts, because a quick tunnel has no saved name. It is fine
+for a demo or a short-lived share, not for a customer's bookmark.
+
+**As a host it costs money.** Cloudflare Workers caps the free plan at 10 ms
+CPU per request, 128 MB memory and 100,000 requests a day - the app cannot run
+there. Cloudflare Containers, the product that would run this Dockerfile, is
+listed as "Available on Workers Paid plan", so it needs the paid Workers plan
+($5/month). A named tunnel that keeps one hostname needs a domain on
+Cloudflare, which means buying a domain.
+
+The stable address for this deployment is the sandbox hostname, which the
+platform gives you and which outlives any tunnel:
+
+```
+https://work-1-wcqnygvsjfbxdklm.prod-runtime.all-hands.dev
+```
+
+`serve.sh` writes it to `/tmp/techarslan-stable-url.txt` when `PUBLIC_URL` is
+set, and keeps the tunnel URL in `/tmp/techarslan-url.txt` as the fallback.
+
 ### One-click on a host you already have an account for
 
 Every one of these builds the bundled `Dockerfile`, so `ffmpeg` comes along and
