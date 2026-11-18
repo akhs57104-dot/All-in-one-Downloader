@@ -1,15 +1,14 @@
 # Render blueprint: connect this repo and Render builds it automatically.
 # Docs: https://render.com/docs/blueprint-spec
+# Docker runtime (not the plain Python runtime) so ffmpeg is bundled and
+# yt-dlp can merge separate video and audio tracks.
 services:
   - type: web
     name: tech-arslan-software-solutions
-    runtime: python
+    runtime: docker
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:$PORT wsgi:app
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.13.5"
       - key: TERABOX_FALLBACK
         value: "on"
