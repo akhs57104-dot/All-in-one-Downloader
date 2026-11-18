@@ -1361,10 +1361,11 @@ def _friendly_download_error(exc: Exception) -> str:
     if "unsupported url" in low:
         return "That link is not from a supported site."
     if "no video could be found" in low:
-        # X/Twitter serves video only to a logged-in session.
-        return ("No video was found in that post. On X/Twitter this usually "
-                "means the post has no video, or that X wants a signed-in "
-                "session - add cookies via SOCIAL_COOKIES for those.")
+        # X/Twitter serves video only to a logged-in session, and a video-less
+        # post looks the same to yt-dlp, so both possibilities are named.
+        return ("No video was found at that link. It may have no video, or the "
+                "site may want a signed-in session - X/Twitter does. Add "
+                "cookies via SOCIAL_COOKIES for those.")
     if "no video" in low or "no media" in low or "no formats" in low:
         return "No downloadable video or audio was found at that link."
     if "not available" in low or "removed" in low or "deleted" in low:
