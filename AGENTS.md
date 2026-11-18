@@ -84,6 +84,13 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
 - Extraction occasionally fails transiently (empty format list from a CDN
   hiccup); `_is_transient()` + one 1.5s retry turns that into a success. On an
   "unsupported URL" the generic extractor is tried once (`force_generic_extractor`).
+- When every extractor fails, `_html_media_fallback(url)` scrapes the page's
+  HTML for media (`videoUrls`, `video_url`, `og:video`, `<video src>`,
+  `contentUrl`). Pinterest keeps plain MP4 + m3u8 links in a `videoUrls` list
+  even when its extractor's unauth API call 404s, so this is what makes those
+  pins work. Only URLs with a **media extension** are trusted - a player *page*
+  URL (Vimeo's `player.vimeo.com/video/<id>`) is HTML and must be dropped, or
+  the download saves a web page.
 - `_format_for_url(url, format_id)` returns a spec: `{"direct": url, ...}` for a
   single-file/audio-only format, `{"hls": True, "url": ..., ...}` for an m3u8
   playlist, or a video+audio pair to merge with ffmpeg.
@@ -94,9 +101,15 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
   supply a Netscape `cookies.txt` via `SOCIAL_COOKIES` (path or contents).
   yt-dlp reports several of these as "no video could be found", which is why
   that message names cookies too.
+- **Threads cannot be downloaded without cookies.** `threads.com` and
+  `threads.net` answer every request - browser or crawler UA alike - with the
+  login page (`og:title` = "Threads • Log in"), and yt-dlp has no Threads
+  extractor at all. `_PLATFORM_HINTS` gives it a specific message instead of the
+  generic "unsupported site".
 - **Test with real, live URLs.** Dead links (a guessed Dailymotion id, an old
-  tweet) fail for reasons that look like code bugs but are not. Public posts on
-  the platforms that allow anonymous access are the ones to measure against.
+  tweet, Pinterest ids scraped from a search page) fail for reasons that look
+  like code bugs but are not. Public posts on the platforms that allow
+  anonymous access are the ones to measure against.
 
 ## Routes
 
