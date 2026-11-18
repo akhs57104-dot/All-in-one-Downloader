@@ -847,7 +847,7 @@ INDEX_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TeraBox Downloader</title>
+<title>TeraBox Downloader - Tech Arslan Software Solutions</title>
 <style>
   :root{
     --bg:#0a0f1c; --bg-2:#0e1526; --surface:#131c31; --surface-2:#1a2540;
@@ -872,11 +872,15 @@ INDEX_HTML = """<!doctype html>
   .topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:20px;}
   .brand{display:flex;align-items:center;gap:13px;min-width:0;}
   .logo{width:44px;height:44px;flex-shrink:0;border-radius:13px;display:flex;align-items:center;justify-content:center;
-        font-weight:800;font-size:1rem;letter-spacing:.5px;color:#fff;
+        font-weight:800;font-size:.86rem;letter-spacing:.3px;color:#fff;
         background:linear-gradient(135deg,var(--primary),var(--primary-2));
         box-shadow:0 10px 24px -10px rgba(99,102,241,.9);}
   .brand h1{font-size:1.22rem;margin:0;letter-spacing:-.2px;}
   .brand .sub{color:var(--muted);font-size:.78rem;margin-top:2px;}
+  .sitefoot{display:flex;align-items:center;justify-content:center;gap:9px;flex-wrap:wrap;
+        margin-top:26px;color:var(--muted-2);font-size:.76rem;}
+  .sitefoot strong{color:var(--muted);font-weight:600;}
+  .sitefoot .dot{opacity:.5;}
   .icon-btn{background:var(--surface);border:1px solid var(--border);color:var(--muted);width:38px;height:38px;
             border-radius:11px;cursor:pointer;font-size:1rem;font-weight:700;display:flex;align-items:center;
             justify-content:center;transition:.15s;}
@@ -1077,10 +1081,10 @@ INDEX_HTML = """<!doctype html>
 <div class="app">
   <div class="topbar">
     <div class="brand">
-      <div class="logo">TB</div>
+      <div class="logo">TAS</div>
       <div>
         <h1>TeraBox Downloader</h1>
-        <div class="sub">Play and download public TeraBox shares</div>
+        <div class="sub">by Tech Arslan Software Solutions</div>
       </div>
     </div>
     <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts">?</button>
@@ -1246,6 +1250,12 @@ INDEX_HTML = """<!doctype html>
     </div>
   </div>
 </div>
+
+<footer class="sitefoot">
+  <span>Built by <strong>Tech Arslan Software Solutions</strong></span>
+  <span class="dot">&bull;</span>
+  <span>TeraBox Downloader</span>
+</footer>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 <script>
@@ -1525,6 +1535,7 @@ function tearDownPlayer(){
   $('nextLink').value = '';
   $('nextPlay').classList.add('hidden');
   setNextStatus('Play a video, then paste the next link. Playback continues until the new one is ready.');
+  setFullscreen(false);
 }
 
 // Attach an HLS (or plain) source to a video element. Returns the Hls instance
@@ -1833,30 +1844,19 @@ $('btnWide').addEventListener('click', () => {
   setTimeout(applyRotation, 220);
 });
 
-// Fullscreen: take the whole player (header, video, controls) fullscreen so it
-// fills any screen. On iOS Safari only a <video> can go fullscreen natively.
-function isFs(){ return document.fullscreenElement || document.webkitFullscreenElement; }
-function toggleFullscreen(){
-  if (isFs()) {
-    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-  } else if (player.requestFullscreen) {
-    player.requestFullscreen().catch(() => {});
-  } else if (player.webkitRequestFullscreen) {
-    player.webkitRequestFullscreen();
-  } else if (activeVideo.webkitEnterFullscreen) {
-    activeVideo.webkitEnterFullscreen();
-  } else {
-    toast('Fullscreen is not available in this browser');
-  }
-}
-function onFsChange(){
-  const on = !!isFs();
+// Fullscreen is done in the page itself: the player is already fixed over the
+// whole viewport, so toggling the .full class hides the chrome and lets the
+// video fill the screen. The browser's native Fullscreen API is deliberately
+// not used - the runtime host shows its own overlay on top of it.
+function isFs(){ return player.classList.contains('full'); }
+function toggleFullscreen(){ setFullscreen(!isFs()); }
+function setFullscreen(on){
   player.classList.toggle('full', on);
   $('btnFs').classList.toggle('on', on);
   setTimeout(applyRotation, 120);
 }
-document.addEventListener('fullscreenchange', onFsChange);
-document.addEventListener('webkitfullscreenchange', onFsChange);
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) setFullscreen(false); });
+document.addEventListener('webkitfullscreenchange', () => { if (!document.webkitFullscreenElement) setFullscreen(false); });
 $('btnFs').addEventListener('click', toggleFullscreen);
 window.addEventListener('resize', applyRotation);
 window.addEventListener('orientationchange', () => setTimeout(applyRotation, 200));
