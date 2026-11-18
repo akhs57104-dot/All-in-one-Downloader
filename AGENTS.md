@@ -68,23 +68,35 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
   `S_PLAT` badge map is built from `/api/social/platforms` at load time, so add a
   site by editing only the Python tuple.
 
+- YouTube: **do not pin `player_client`**. Pinning a set (the old
+  `_YT_CLIENTS = ("android", "ios", "web", "tv_embedded")`) dropped the format
+  list to 1; letting yt-dlp choose returned 24+ for the same URL. The `web`
+  client is bot-blocked from a datacenter IP, but the default client set already
+  includes ones that work.
+- Every extractor runs through curl_cffi Chrome impersonation
+  (`_impersonate_target()`, cached). yt-dlp needs an `ImpersonateTarget`
+  instance, not a string - a string trips an assertion in yt-dlp. This is what
+  gets TikTok/Facebook/Dailymotion working without cookies.
 - `_extract_info(url) -> (info, cookies)` runs yt-dlp and returns the info dict
   plus the extractor's cookie jar. The cookies matter: **TikTok signs its media
   URLs against yt-dlp's session cookies**, so they are threaded through
   resolve -> stream -> download or the CDN answers 403.
-- YouTube from a datacenter IP needs the `android` player client (see
-  `_YT_CLIENTS`); the `web` client is bot-blocked. Progressive format `18`
-  (360p MP4) streams and downloads cleanly.
+- Extraction occasionally fails transiently (empty format list from a CDN
+  hiccup); `_is_transient()` + one 1.5s retry turns that into a success. On an
+  "unsupported URL" the generic extractor is tried once (`force_generic_extractor`).
 - `_format_for_url(url, format_id)` returns a spec: `{"direct": url, ...}` for a
   single-file/audio-only format, `{"hls": True, "url": ..., ...}` for an m3u8
   playlist, or a video+audio pair to merge with ffmpeg.
 - HLS playback: `_social_hls_playlist()` rewrites the manifest to same-origin
   `/api/social/hls/<token>/<n>.ts` segment URLs; `_SOCIAL_HLS` is a TTL cache
   (`_SOCIAL_HLS_TTL`) pruned by `_prune_hls()`.
-- Extraction occasionally fails transiently (empty format list from a CDN
-  hiccup); `_is_transient()` + one 1.5s retry turns that into a success.
-- Instagram, Facebook, Vimeo and age-gated content need a signed-in session;
+- Instagram, Facebook, Reddit, Vimeo and X/Twitter need a signed-in session;
   supply a Netscape `cookies.txt` via `SOCIAL_COOKIES` (path or contents).
+  yt-dlp reports several of these as "no video could be found", which is why
+  that message names cookies too.
+- **Test with real, live URLs.** Dead links (a guessed Dailymotion id, an old
+  tweet) fail for reasons that look like code bugs but are not. Public posts on
+  the platforms that allow anonymous access are the ones to measure against.
 
 ## Routes
 
