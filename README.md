@@ -130,6 +130,11 @@ binds to the host's `$PORT`:
 gunicorn --workers 1 --threads 8 --timeout 300 --no-control-socket --bind [::]:$PORT wsgi:app
 ```
 
+The start command must stay `bash ./start.sh` (what `railway.json` sets). If a
+custom start command is typed into Railway's dashboard instead, it is passed
+through without a shell in some cases, which is how the literal `$PORT` in
+`--bind 0.0.0.0:$PORT` reaches gunicorn and crashes the deploy.
+
 Three settings matter when a host reports the app as "crashed":
 
 * **Bind to `$PORT`, dual-stack.** Never hardcode a port. Railway, Render and
@@ -148,6 +153,18 @@ Three settings matter when a host reports the app as "crashed":
 
 `start.sh` also only passes `--no-control-socket` when the installed gunicorn
 supports it; gunicorn below 23 exits with `unrecognized arguments` otherwise.
+
+#### `Error: '$PORT' is not a valid port number`
+
+Railway's start command field pre-fills a `$PORT` placeholder. If the value
+stays in the form `--bind 0.0.0.0:$PORT` without a shell to expand it, gunicorn
+receives the literal text `$PORT` and exits with that message. `${PORT:-12000}`
+does not rescue it, because a non-empty literal is not an empty variable.
+
+`start.sh` and `run.sh` now reject any non-numeric `PORT` and fall back to
+12000, so the message is harmless even if a host still injects it. If you set a
+start command yourself, leave it as `bash ./start.sh` (no `--bind` argument) and
+let `start.sh` read `$PORT` in the shell, where expansion works.
 
 Docker (bundles `ffmpeg`):
 
