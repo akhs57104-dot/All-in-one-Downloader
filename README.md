@@ -36,7 +36,28 @@ PORT=12000 nohup ./run.sh > /tmp/techarslan.out 2>&1 &
 
 Managed hosts: `Dockerfile`, `Procfile`, `railway.json`, `railpack.json`,
 `nixpacks.toml`, `render.yaml` and `fly.toml` are ready for Railway, Render,
-Fly.io, Heroku and similar. All three Railway builders work:
+Fly.io, Heroku and similar.
+
+### One-click on a host you already have an account for
+
+Every one of these builds the bundled `Dockerfile`, so `ffmpeg` comes along and
+the dual-stack `start.sh` binds whatever `$PORT` the host injects.
+
+- **Render** — <https://render.com/deploy?repo=https://github.com/akhs57104-dot/All-in-one-Downloader>
+  reads `render.yaml`, picks the Docker runtime and health-checks `/healthz`.
+- **Koyeb** — <https://app.koyeb.com/deploy?type=git&repository=github.com/akhs57104-dot/All-in-one-Downloader&branch=main&builder=dockerfile&ports=8080;http;/&env%5BPORT%5D=8080&env%5BTERABOX_FALLBACK%5D=on>
+  builds the same Dockerfile and exposes port 8080 over HTTP.
+- **Railway** — <https://railway.com/new/github/akhs57104-dot/All-in-one-Downloader>
+  then pick "Dockerfile" as the builder if it does not do so itself.
+- **Heroku / Dokku / Coolify** — they read `Procfile` (`web: bash ./start.sh`).
+
+No account is needed for a temporary public URL on any Linux box that can reach
+the internet: `cloudflared tunnel --url http://127.0.0.1:12000` prints a
+`https://*.trycloudflare.com` link that proxies to the local server.
+
+### Railway
+
+All three Railway builders work:
 
 * **Dockerfile** - pinned in `railway.json`, bundles `ffmpeg`.
 * **Railpack** (Railway's current default) - `railpack.json` adds `ffmpeg`
