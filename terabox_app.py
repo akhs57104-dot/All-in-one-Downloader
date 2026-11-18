@@ -1036,6 +1036,97 @@ SOCIAL_PLATFORMS = (
 _SOCIAL_BY_KEY = {p[0]: p for p in SOCIAL_PLATFORMS}
 
 
+# Guidance shown when a platform is selected: where to copy the link from, and
+# how to use the tool. Platforms without an entry fall back to the template.
+SOCIAL_HELP = {
+    "youtube": ("Open the video, tap Share, then Copy link. The address bar works too.",
+                "Paste it above and press Get video. Pick a quality: 360p plays in the "
+                "browser, higher qualities download as an MP4."),
+    "instagram": ("Open the post or Reel, tap the \u22ef menu, then Copy link. For Stories, "
+                  "use the share sheet and Copy link.",
+                  "Public posts resolve without an account. Private or age-gated posts need "
+                  "a signed-in session (set SOCIAL_COOKIES)."),
+    "facebook": ("On the video, tap Share, then Copy link. In the app, the \u22ef menu also "
+                 "has Copy link.",
+                 "Public videos work directly. Private groups and friends-only posts need a "
+                 "signed-in session (set SOCIAL_COOKIES)."),
+    "tiktok": ("Open the video, tap Share, then Copy link. The app gives you a short "
+               "vm.tiktok.com link, which works here.",
+               "Paste it and press Get video. TikTok serves single-file MP4s, so they usually "
+               "play right in the browser."),
+    "twitter": ("Open the post, tap Share, then Copy link. x.com and twitter.com links both "
+                "work.",
+                "Paste it and press Get video. Videos with sound play directly; GIFs come "
+                "through as short MP4s."),
+    "whatsapp": ("Open the video message, tap the \u22ef menu, then Forward or Copy link.",
+                 "Only links that are publicly reachable work; media sent inside an end-to-end "
+                 "chat is not addressable, so download it from the chat instead."),
+    "snapchat": ("Open the Spotlight or Story, tap Share, then Copy link.",
+                 "Public Spotlight posts resolve. Private snaps are not downloadable."),
+    "linkedin": ("On the post, tap \u22ef then Copy link to post.",
+                 "Public posts work. Posts that require sign-in need SOCIAL_COOKIES."),
+    "pinterest": ("Open the pin, tap Share, then Copy link.",
+                  "Video pins resolve. Image pins come back as a still."),
+    "reddit": ("On the post, tap Share, then Copy link. redd.it short links work too.",
+               "Direct video posts and Reddit-hosted video play in the browser. Posts that "
+               "link out to another host are fetched from that host instead."),
+    "threads": ("On the post, tap the share icon, then Copy link.",
+                "Public posts work. Sign-in-only posts need SOCIAL_COOKIES."),
+    "telegram": ("Open the message, tap \u22ef, then Copy Link. Public t.me channel links work.",
+                 "Only public channels and groups are reachable; private chats are not."),
+    "vimeo": ("Open the video, tap Share, then Copy link.",
+              "Public videos resolve. Password-protected or private videos need SOCIAL_COOKIES."),
+    "dailymotion": ("Open the video, tap Share, then Copy link. dai.ly short links work.",
+                    "Dailymotion often serves HLS, so the tool rewrites the playlist and plays "
+                    "it in the browser; the download is saved as an MP4."),
+    "twitch": ("For a live stream, copy the channel URL. For a past broadcast, open the VOD "
+               "and tap Share, then Copy link.",
+               "VODs download fine. A live stream can only be captured while it is running."),
+    "soundcloud": ("Open the track, tap Share, then Copy link.",
+                   "Tracks download as audio (MP3/M4A), not video."),
+    "bilibili": ("Open the video, tap Share, then Copy link. b23.tv short links work.",
+                 "Some videos are region-locked or need a signed-in session; set "
+                 "SOCIAL_COOKIES for those."),
+    "rumble": ("Open the video, tap Share, then Copy link.",
+               "Rumble videos resolve to a single MP4 and usually play in the browser."),
+    "odysee": ("Open the video, tap Share, then Copy link.",
+               "LBRY/Odysee videos resolve directly."),
+    "streamable": ("Open the video, tap Share, then Copy link.",
+                   "Streamable serves a single MP4, so playback works in the browser."),
+    "imgur": ("Open the post, tap \u22ef, then Copy link.",
+              "Video posts resolve. Single images come back as a still."),
+    "kick": ("Open the channel or VOD, tap Share, then Copy link.",
+             "VODs download. Live streams are only captured while running."),
+    "archive": ("Open the item page and copy the address from the browser bar.",
+                "Internet Archive items often expose several files; the tool lists the "
+                "playable video or audio."),
+    "tumblr": ("On the post, tap the share icon, then Copy link.",
+               "Public posts work. Blog-visible-only posts need SOCIAL_COOKIES."),
+    "9gag": ("Open the post, tap Share, then Copy link.",
+             "Video posts resolve; image posts come back as a still."),
+    "patreon": ("Open the post, tap Share, then Copy link.",
+                "Only public posts resolve; patron-only posts need SOCIAL_COOKIES."),
+    "bbc": ("Open the programme page and copy the address from the browser bar.",
+            "iPlayer content may be geo-restricted and need a signed-in session."),
+    "other": ("Copy the video page's address from your browser bar, or use the site's own Share "
+              "and Copy link option.",
+              "Any link yt-dlp understands works here, even for sites not listed above. Paste "
+              "it and press Get video; if the site refuses anonymous access, it will say so."),
+}
+
+_HELP_DEFAULT = (
+    "Open the video on {name}, tap the Share button, then choose Copy link. You can also "
+    "copy the address straight from your browser's address bar.",
+    "Paste the link in the box above and press Get video. Play it in the browser when a "
+    "single-file stream is offered, otherwise pick a quality to download it as an MP4.",
+)
+
+
+def social_help(key: str, name: str) -> dict:
+    where, how = SOCIAL_HELP.get(key, _HELP_DEFAULT)
+    return {"where": where.format(name=name), "how": how.format(name=name)}
+
+
 def _host_matches(host: str, roots) -> bool:
     host = (host or "").lower().lstrip(".")
     return any(host == r or host.endswith("." + r) for r in roots)
@@ -1051,7 +1142,8 @@ def detect_platform(url: str) -> str:
 
 
 def social_platform_list() -> list:
-    return [{"key": k, "name": n, "color": c, "badge": b}
+    return [{"key": k, "name": n, "color": c, "badge": b,
+             "help": social_help(k, n)}
             for k, n, c, b, _r in SOCIAL_PLATFORMS]
 
 
@@ -1762,9 +1854,13 @@ INDEX_HTML = """<!doctype html>
   .foot-brand .logo svg{width:22px;height:22px;}
   .foot-name{font-size:.96rem;font-weight:800;letter-spacing:-.2px;color:var(--text);}
   .foot-tag{color:var(--muted-2);font-size:.74rem;margin-top:2px;letter-spacing:.4px;}
-  .foot-meta{display:flex;flex-direction:column;gap:7px;font-size:.76rem;color:var(--muted);min-width:180px;}
-  .foot-meta .k{color:var(--muted-2);font-size:.66rem;text-transform:uppercase;letter-spacing:1px;font-weight:700;}
-  .foot-meta .v{color:var(--text);font-weight:600;}
+  .foot-dev{display:flex;flex-direction:column;gap:2px;padding:11px 15px;border-radius:12px;
+        border:1px solid rgba(47,107,255,.35);background:linear-gradient(180deg,rgba(47,107,255,.13),rgba(47,107,255,.05));
+        min-width:210px;}
+  .foot-dev .devlabel{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:1.1px;color:var(--accent);}
+  .foot-dev .devname{font-size:1.02rem;font-weight:800;letter-spacing:-.2px;color:var(--text);}
+  .foot-dev .devorg{font-size:.74rem;color:var(--muted);}
+  .foot-dev .devsub{font-size:.68rem;color:var(--muted-2);margin-top:2px;}
   .foot-badges{display:flex;flex-wrap:wrap;gap:7px;align-items:flex-start;max-width:260px;}
   .fchip{font-size:.68rem;font-weight:600;color:var(--muted);border:1px solid var(--border);background:var(--surface-2);
         border-radius:999px;padding:5px 11px;white-space:nowrap;}
@@ -1877,6 +1973,28 @@ INDEX_HTML = """<!doctype html>
   #platforms::-webkit-scrollbar{width:8px;}
   #platforms::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:8px;}
   #platforms::-webkit-scrollbar-track{background:transparent;}
+
+  /* per-platform help card */
+  .helpcard{margin-top:16px;}
+  .helphead{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+  .helpbadge{width:30px;height:30px;flex-shrink:0;border-radius:9px;display:flex;align-items:center;justify-content:center;
+        font-size:.68rem;font-weight:800;color:#fff;background:#8b93a7;}
+  .helptitle{font-size:.9rem;font-weight:700;letter-spacing:-.2px;}
+  .helpblock{margin-bottom:12px;}
+  .helplabel{display:block;font-size:.64rem;font-weight:800;text-transform:uppercase;letter-spacing:1.1px;
+        color:var(--muted-2);margin-bottom:4px;}
+  .helptext{margin:0;font-size:.79rem;line-height:1.55;color:var(--muted);}
+  .helpsteps{margin:4px 0 0;padding-left:18px;font-size:.78rem;line-height:1.75;color:var(--muted);}
+  .helpsteps strong{color:var(--text);font-weight:700;}
+
+  /* the source link, shown under the player title */
+  .plink{display:flex;align-items:center;gap:6px;margin-top:3px;min-width:0;}
+  .plink a{color:var(--accent);font-size:.72rem;text-decoration:none;overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap;}
+  .plink a:hover{text-decoration:underline;}
+  .plink .cp{background:transparent;border:0;color:var(--muted-2);cursor:pointer;font-size:.7rem;
+        padding:2px 5px;border-radius:5px;flex-shrink:0;}
+  .plink .cp:hover{color:var(--text);background:rgba(255,255,255,.08);}
   .result{display:flex;gap:16px;align-items:center;}
   .rthumb{width:150px;height:86px;flex-shrink:0;border-radius:12px;overflow:hidden;background:var(--surface-2);
         border:1px solid var(--border);display:flex;align-items:center;justify-content:center;}
@@ -1919,7 +2037,8 @@ INDEX_HTML = """<!doctype html>
   .pbox.wide .phead,.pbox.wide .nextbar{display:none;}
   .phead{display:flex;align-items:center;gap:12px;padding:12px 15px;border-bottom:1px solid var(--border);
          background:linear-gradient(180deg,#0d1526,#0a1120);flex-shrink:0;}
-  .ptitle{flex:1;min-width:0;display:flex;align-items:center;gap:10px;}
+  .ptitle{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+  .ptitletop{display:flex;align-items:center;gap:10px;min-width:0;}
   .ptitle .t{font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .tag{font-size:.68rem;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:#c9cbff;
        border:1px solid rgba(99,102,241,.5);background:rgba(99,102,241,.15);border-radius:999px;padding:3px 10px;flex-shrink:0;}
@@ -2117,7 +2236,29 @@ INDEX_HTML = """<!doctype html>
           </div>
           <input id="platSearch" class="platsearch" type="text" placeholder="Search platforms..." autocomplete="off">
           <div id="platforms" class="platforms"></div>
-          <div class="platnote">Tap a platform to copy its name into the box, then paste the full link.</div>
+          <div class="platnote">Tap a platform to see where to copy its link from.</div>
+        </div>
+
+        <div class="card helpcard" id="helpCard">
+          <div class="helphead">
+            <span class="helpbadge" id="helpBadge">?</span>
+            <span class="helptitle" id="helpTitle">How to use this tool</span>
+          </div>
+          <div class="helpblock">
+            <span class="helplabel">Where to get the link</span>
+            <p class="helptext" id="helpWhere">Pick a platform above to see exactly where its
+              Share / Copy link option is.</p>
+          </div>
+          <div class="helpblock">
+            <span class="helplabel">How to download</span>
+            <p class="helptext" id="helpHow">Paste the link in the box, press Get video, then play
+              it here or pick a quality to save it as an MP4.</p>
+          </div>
+          <ol class="helpsteps">
+            <li>Copy the video link from the app or site.</li>
+            <li>Paste it into the box and press <strong>Get video</strong>.</li>
+            <li>Press <strong>Play</strong> to watch, or <strong>Download</strong> to save it.</li>
+          </ol>
         </div>
       </aside>
     </div>
@@ -2174,8 +2315,14 @@ INDEX_HTML = """<!doctype html>
   <div class="pbox" id="pbox">
     <div class="phead">
       <div class="ptitle">
-        <span class="t" id="playerTitle">Video</span>
-        <span class="tag hidden" id="playerTag"></span>
+        <div class="ptitletop">
+          <span class="t" id="playerTitle">Video</span>
+          <span class="tag hidden" id="playerTag"></span>
+        </div>
+        <div class="plink hidden" id="playerLink">
+          <a id="playerLinkA" href="#" target="_blank" rel="noopener noreferrer"></a>
+          <button class="cp" id="playerLinkCopy" title="Copy the source link">Copy</button>
+        </div>
       </div>
       <div class="phead-actions">
         <button class="btn ghost sm" id="btnDownloadTop">
@@ -2297,9 +2444,11 @@ INDEX_HTML = """<!doctype html>
         <div class="foot-tag">All-in-One Video Downloader</div>
       </div>
     </div>
-    <div class="foot-meta">
-      <span class="k">Developed by</span>
-      <span class="v">Tech Arslan Software Solutions</span>
+    <div class="foot-dev">
+      <span class="devlabel">Developed by</span>
+      <span class="devname">Tech Arslan</span>
+      <span class="devorg">Tech Arslan Software Solutions</span>
+      <span class="devsub">Design &amp; development of this tool</span>
     </div>
     <div class="foot-badges">
       <span class="fchip">Fast streaming</span>
@@ -2310,7 +2459,7 @@ INDEX_HTML = """<!doctype html>
   </div>
   <div class="foot-bar">
     <span class="copy">&copy; <span id="year"></span> Tech Arslan Software Solutions. All rights reserved.</span>
-    <span class="made">Made with care by <strong>Tech Arslan</strong></span>
+    <span class="made">Built &amp; maintained by <strong>Tech Arslan</strong></span>
   </div>
 </footer>
 
@@ -2594,6 +2743,17 @@ function setNextStatus(msg, kind){
   el.textContent = msg || '';
   el.className = 'nextstatus' + (kind ? ' ' + kind : '');
 }
+// Show (or hide) the source link under the player title, so the user can see
+// where the video came from and copy it again.
+function setPlayerSource(url){
+  const wrap = $('playerLink'), a = $('playerLinkA');
+  if (!url) { wrap.classList.add('hidden'); a.removeAttribute('href'); a.textContent = ''; return; }
+  a.href = url;
+  const scheme = url.indexOf('://');
+  a.textContent = scheme >= 0 ? url.slice(scheme + 3) : url;
+  a.title = url;
+  wrap.classList.remove('hidden');
+}
 function tearDownPlayer(){
   playAttempt++;
   if (hls) { hls.destroy(); hls = null; }
@@ -2605,6 +2765,7 @@ function tearDownPlayer(){
   playedEl.style.width = '0%'; bufferedEl.style.width = '0%'; knobEl.style.left = '0%';
   timeEl.textContent = '0:00 / 0:00';
   playerTag.classList.add('hidden'); playerTag.classList.remove('preview');
+  setPlayerSource('');
   playerSpinner.style.display = 'none';
   centerPlay.classList.add('hidden');
   controls.classList.remove('hide');
@@ -2824,6 +2985,7 @@ async function openMediaPlayer(opts){
   playerTitle.textContent = opts.title || 'Video';
   playerTag.textContent = opts.tag || 'Stream';
   playerTag.classList.remove('hidden'); playerTag.classList.remove('preview');
+  setPlayerSource(opts.source || '');
   player.classList.remove('hidden');
   document.body.classList.add('playing');
   pushPlayerHistory();
@@ -2973,6 +3135,10 @@ window.addEventListener('orientationchange', () => setTimeout(applyRotation, 200
 
 $('btnDownloadTop').addEventListener('click', () => { if (currentFile) startDownload(currentFile, $('btnDownloadTop'), currentLink); });
 $('playerClose').addEventListener('click', closePlayer);
+$('playerLinkCopy').addEventListener('click', () => {
+  const a = $('playerLinkA');
+  if (a.href) copyText(a.href, 'Source link copied');
+});
 // No click-to-close on the backdrop: a stray tap outside the video used to
 // dismiss the player and stop playback.
 stage.addEventListener('mousemove', showControls);
@@ -3075,6 +3241,22 @@ const sPasteBtn = $('sPaste'), sStatusEl = $('sStatus');
 const sResult = $('sResult'), sThumb = $('sThumb'), sTitle = $('sTitle'), sSub = $('sSub'), sTags = $('sTags');
 const sFormats = $('sFormats'), platformsEl = $('platforms'), platCountEl = $('platCount');
 const platSearchEl = $('platSearch');
+const helpBadgeEl = $('helpBadge'), helpTitleEl = $('helpTitle');
+const helpWhereEl = $('helpWhere'), helpHowEl = $('helpHow');
+const HELP_DEFAULT = {
+  where: 'Open the video on the platform, tap the Share button, then choose Copy link. '
+       + 'You can also copy the address from your browser\u2019s address bar.',
+  how: 'Paste the link in the box above and press Get video. Play it in the browser when a '
+     + 'single-file stream is offered, otherwise pick a quality to download it as an MP4.'
+};
+function showPlatformHelp(p){
+  const h = (p && p.help) || HELP_DEFAULT;
+  helpBadgeEl.textContent = (p && p.badge) || '?';
+  helpBadgeEl.style.background = (p && p.color) || '#8b93a7';
+  helpTitleEl.textContent = p ? ('How to download from ' + p.name) : 'How to use this tool';
+  helpWhereEl.textContent = h.where;
+  helpHowEl.textContent = h.how;
+}
 platSearchEl.addEventListener('input', () => renderPlatforms(allPlatforms));
 let socialMedia = null;
 
@@ -3110,6 +3292,7 @@ function renderPlatforms(list){
     b.title = 'Paste a ' + p.name + ' link';
     b.addEventListener('click', () => {
       document.querySelectorAll('.plat').forEach(x => x.classList.toggle('active', x === b));
+      showPlatformHelp(p);
       sLinkEl.focus();
       sSetStatus('Paste the ' + p.name + ' link in the box, then press Get video.');
     });
@@ -3132,6 +3315,7 @@ function renderResult(media){
   if (media.is_live) bits.push('Live');
   sSub.textContent = bits.join(' \u00b7 ');
   const pname = (platformsEl.querySelector('.plat[data-key="' + media.platform + '"] .pn') || {}).textContent;
+  showPlatformHelp(allPlatforms.find(p => p.key === media.platform));
   sTags.innerHTML =
     (pname ? '<span class="rtag">' + esc(pname) + '</span>' : '') +
     '<span class="rtag">' + media.formats.length + ' formats</span>' +
@@ -3171,6 +3355,7 @@ function socialPlay(media, f){
     tag: f.label,
     src: url,
     isAudio: !!f.audio_only,
+    source: media.url,
   });
   addHistory({ kind: 'played', name: media.title, id: f.format_id, link: media.url,
     is_video: true, source: 'social', playable: !!f.playable,

@@ -24,7 +24,10 @@ single-file (progressive) streams are offered.
 
 ## Social Downloader
 
-Backed by [yt-dlp](https://github.com/yt-dlp/yt-dlp). The flow is:
+Backed by [yt-dlp](https://github.com/yt-dlp/yt-dlp). The home page lists every
+supported platform in a searchable picker; selecting one shows a short card with
+where to copy the link from on that site and how the download works, and the
+platform is also picked automatically once a link resolves. The flow is:
 
 1. `POST /api/social/resolve` extracts the media metadata and the list of
    formats.
