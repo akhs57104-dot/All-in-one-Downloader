@@ -103,6 +103,32 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
 - `GET /api/download` — the whole file as an attachment (original MP4 with a
   cookie; otherwise the helper's `.ts` transcode).
 
+## Deploying to Railway (why it crashed twice)
+
+Railway reports a failed **build** and a failed **runtime** the same way: the
+deployment says "crashed". Both real causes so far were build failures.
+
+1. **A hardcoded port.** Railway injects `$PORT` and health-checks that exact
+   port. `ENV PORT=12000` made the app listen where nothing was checked.
+   Fix: bind to `$PORT` (`start.sh`).
+2. **`nixpacks.toml` with `nixPkgs`.** Declaring `nixPkgs` replaces the whole
+   setup phase Nixpacks generates for Python, so `python3` was never installed
+   and the build died with `python: command not found`. Use `aptPkgs` for
+   system packages instead; it leaves Python setup intact.
+
+Other traps:
+
+- **Non-root + mode `0600` files.** If a checkout leaves files owner-only, the
+  platform's unprivileged uid cannot read `wsgi.py` and gunicorn dies with
+  `PermissionError`. The Dockerfile does `chmod -R a+rX /app`; keep it.
+- **`--no-control-socket` on old gunicorn.** gunicorn below 23 exits with
+  `unrecognized arguments: --no-control-socket`. `start.sh` passes the flag
+  only when `--help` lists it.
+- **Three builders, three config files.** `railway.json` pins the Dockerfile.
+  If the service is switched to Railpack (Railway's current default) or
+  Nixpacks (older), `railpack.json` / `nixpacks.toml` must supply `ffmpeg`
+  themselves; the Dockerfile is ignored. All three are kept working.
+
 ## Conventions
 
 - Keep it a single file; no build step.
