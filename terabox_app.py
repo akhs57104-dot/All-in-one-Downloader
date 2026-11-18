@@ -64,6 +64,20 @@ except ImportError:  # pragma: no cover - depends on the environment
 
 app = Flask(__name__)
 
+
+def _request_link() -> str:
+    """The `link` field of the JSON body, as a string, or ''.
+
+    The body is attacker-controlled: it may be absent, a list, or carry a
+    non-string `link`, and a bare `(... or "").strip()` turns those into a 500.
+    """
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return ""
+    link = body.get("link")
+    return link.strip() if isinstance(link, str) else ""
+
+
 # Some sandboxes (Railway, Fly) start with no writable temp dir, so
 # tempfile.mkstemp() raises and gunicorn dies while booting the worker.
 # Pick the first writable candidate up front and point tempfile at it.
@@ -574,7 +588,7 @@ def index():
 
 @app.route("/api/resolve", methods=["POST"])
 def api_resolve():
-    link = ((request.json or {}).get("link") or "").strip()
+    link = _request_link()
     if not link:
         return jsonify({"ok": False, "error": "Please paste a TeraBox link."}), 400
     if not is_allowed_share_url(link):
@@ -1741,7 +1755,7 @@ def api_social_platforms():
 @app.route("/api/social/resolve", methods=["POST"])
 def api_social_resolve():
     """Resolve a social link into metadata plus the formats on offer."""
-    link = ((request.json or {}).get("link") or "").strip()
+    link = _request_link()
     if not link:
         return jsonify({"ok": False, "error": "Please paste a link first."}), 400
     if not re.match(r"^https?://", link, re.I):
