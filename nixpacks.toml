@@ -1,0 +1,6 @@
+# Railway uses the Dockerfile (see railway.json). This file only matters if the
+# service is switched to the Nixpacks builder: it adds ffmpeg so yt-dlp can
+# merge separate video and audio tracks. Nixpacks auto-detects Python and reads
+# the Procfile for the start command.
+[phases.setup]
+nixPkgs = ["ffmpeg"]

@@ -34,9 +34,23 @@ Keep it running on any Linux box (auto-restarts if gunicorn ever exits):
 PORT=12000 nohup ./run.sh > /tmp/techarslan.out 2>&1 &
 ```
 
-Managed hosts: `Procfile` and `render.yaml` are ready for Render, Railway,
-Heroku and similar. Connect the repository and the platform runs
-`gunicorn --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:$PORT wsgi:app`.
+Managed hosts: `Dockerfile`, `Procfile`, `railway.json`, `nixpacks.toml` and
+`render.yaml` are ready for Railway, Render, Heroku and similar. The container
+runs one gunicorn worker with threads and binds to the host's `$PORT`:
+
+```
+gunicorn --workers 1 --threads 8 --timeout 300 --no-control-socket --bind 0.0.0.0:$PORT wsgi:app
+```
+
+Two settings matter when a host reports the app as "crashed":
+
+* **Bind to `$PORT`.** Never hardcode a port. Railway, Render and Fly inject
+  `$PORT` and health-check that exact port; an app listening on 12000 looks
+  dead to them.
+* **Readable files, non-root user.** The image does `chmod -R a+rX /app` and
+  runs as `appuser`. A checkout whose files are mode `0600` (owner-only) makes
+  gunicorn die with `PermissionError: /app/wsgi.py` when the platform runs it
+  as an unprivileged uid.
 
 Docker (bundles `ffmpeg`):
 
