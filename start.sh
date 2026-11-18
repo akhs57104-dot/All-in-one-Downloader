@@ -10,7 +10,18 @@
 # which a host reports as a crash.
 set -u
 
+# Railway's dashboard offers a "$PORT" placeholder, and a start command that
+# contains the unquoted form `--port $PORT` reaches the process with the literal
+# text "$PORT" when the shell does not expand it. Gunicorn then fails with
+# "'$PORT' is not a valid port number" and the deploy is reported as a crash.
+# Treat any non-numeric value as absent and fall back to the default.
 PORT="${PORT:-12000}"
+case "$PORT" in
+  ''|*[!0-9]*)
+    echo "[start.sh] PORT is not numeric ('$PORT'); falling back to 12000" >&2
+    PORT=12000
+    ;;
+esac
 
 if command -v gunicorn >/dev/null 2>&1; then
   GUNICORN=(gunicorn)

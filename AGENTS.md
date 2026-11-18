@@ -203,6 +203,13 @@ Other traps:
   to "personal or non-commercial use" and forbid serving third parties. Netlify
   has no Dockerfile/container support at all and caps functions at 60 s
   synchronous. Do not offer either as a host.
+- **The `'$PORT' is not a valid port number` crash is fixed.** Railway's start
+  command field shows a `$PORT` placeholder, and a command that keeps the
+  unquoted form reaches gunicorn with the literal text `$PORT`; `${PORT:-12000}`
+  does not rescue that, because a non-empty literal is not an empty variable.
+  `start.sh` and `run.sh` now reject any non-numeric `PORT` and fall back to
+  12000. Verified in the built image with `-e 'PORT=$PORT'` (boots, `/healthz`
+  200) and with `-e PORT=8080` (200).
 - **No managed host can be deployed from here.** Railway fails at runtime with
   no logs, and Fly.io, Render, Koyeb and Heroku all need an interactive login
   or an API token that this environment does not have (the browser has no
