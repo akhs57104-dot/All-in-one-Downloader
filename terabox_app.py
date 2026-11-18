@@ -865,26 +865,54 @@ INDEX_HTML = """<!doctype html>
          radial-gradient(1200px 600px at 10% -10%,rgba(99,102,241,.18),transparent 60%),
          radial-gradient(900px 500px at 100% 0%,rgba(139,92,246,.14),transparent 55%),
          var(--bg);
-       display:flex;justify-content:center;padding:26px 16px 60px;-webkit-font-smoothing:antialiased;}
+       display:flex;flex-direction:column;align-items:center;padding:26px 16px 60px;-webkit-font-smoothing:antialiased;}
   .app{width:100%;max-width:760px;}
 
   /* topbar */
-  .topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:20px;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px;}
   .brand{display:flex;align-items:center;gap:13px;min-width:0;}
-  .logo{width:44px;height:44px;flex-shrink:0;border-radius:13px;display:flex;align-items:center;justify-content:center;
-        font-weight:800;font-size:.86rem;letter-spacing:.3px;color:#fff;
-        background:linear-gradient(135deg,var(--primary),var(--primary-2));
-        box-shadow:0 10px 24px -10px rgba(99,102,241,.9);}
-  .brand h1{font-size:1.22rem;margin:0;letter-spacing:-.2px;}
-  .brand .sub{color:var(--muted);font-size:.78rem;margin-top:2px;}
-  .sitefoot{display:flex;align-items:center;justify-content:center;gap:9px;flex-wrap:wrap;
-        margin-top:26px;color:var(--muted-2);font-size:.76rem;}
-  .sitefoot strong{color:var(--muted);font-weight:600;}
-  .sitefoot .dot{opacity:.5;}
+  .logo{width:46px;height:46px;flex-shrink:0;border-radius:14px;display:flex;align-items:center;justify-content:center;
+        color:#fff;position:relative;overflow:hidden;
+        background:linear-gradient(140deg,#6366f1 0%,#8b5cf6 55%,#22d3ee 130%);
+        box-shadow:0 12px 26px -12px rgba(99,102,241,.95),inset 0 1px 0 rgba(255,255,255,.28);}
+  .logo svg{width:26px;height:26px;display:block;}
+  .logo::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.18),transparent 60%);}
+  .brandname{font-size:1.16rem;font-weight:800;letter-spacing:-.3px;line-height:1.15;
+        background:linear-gradient(92deg,#ffffff,#c7d2fe 60%,#a5f3fc);
+        -webkit-background-clip:text;background-clip:text;color:transparent;}
+  .brandtag{display:flex;align-items:center;gap:6px;color:var(--muted-2);font-size:.72rem;font-weight:600;
+        letter-spacing:1.1px;text-transform:uppercase;margin-top:3px;}
+  .brandtag::before{content:"";width:14px;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--primary),var(--accent));}
+  .brandside{display:flex;align-items:center;gap:10px;}
+  .prod-pill{display:inline-flex;align-items:center;gap:7px;font-size:.72rem;font-weight:700;color:#dbe3ff;
+        border:1px solid rgba(99,102,241,.42);background:rgba(99,102,241,.13);border-radius:999px;padding:6px 13px;
+        white-space:nowrap;}
+  .prod-pill .dot{width:6px;height:6px;border-radius:50%;background:var(--success);box-shadow:0 0 8px var(--success);}
   .icon-btn{background:var(--surface);border:1px solid var(--border);color:var(--muted);width:38px;height:38px;
             border-radius:11px;cursor:pointer;font-size:1rem;font-weight:700;display:flex;align-items:center;
             justify-content:center;transition:.15s;}
   .icon-btn:hover{color:var(--text);border-color:var(--border-2);background:var(--surface-2);}
+
+  /* footer */
+  .sitefoot{margin-top:30px;width:100%;max-width:760px;border:1px solid var(--border);border-radius:var(--radius);
+        background:linear-gradient(180deg,var(--surface),var(--bg-2));box-shadow:var(--shadow);overflow:hidden;}
+  .foot-top{display:flex;flex-wrap:wrap;gap:22px;justify-content:space-between;padding:20px 20px 18px;}
+  .foot-brand{display:flex;align-items:center;gap:12px;min-width:210px;}
+  .foot-brand .logo{width:40px;height:40px;border-radius:12px;}
+  .foot-brand .logo svg{width:22px;height:22px;}
+  .foot-name{font-size:.96rem;font-weight:800;letter-spacing:-.2px;color:var(--text);}
+  .foot-tag{color:var(--muted-2);font-size:.74rem;margin-top:2px;letter-spacing:.4px;}
+  .foot-meta{display:flex;flex-direction:column;gap:7px;font-size:.76rem;color:var(--muted);min-width:180px;}
+  .foot-meta .k{color:var(--muted-2);font-size:.66rem;text-transform:uppercase;letter-spacing:1px;font-weight:700;}
+  .foot-meta .v{color:var(--text);font-weight:600;}
+  .foot-badges{display:flex;flex-wrap:wrap;gap:7px;align-items:flex-start;max-width:260px;}
+  .fchip{font-size:.68rem;font-weight:600;color:var(--muted);border:1px solid var(--border);background:var(--surface-2);
+        border-radius:999px;padding:5px 11px;white-space:nowrap;}
+  .foot-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;
+        padding:12px 20px;border-top:1px solid var(--border);background:rgba(10,15,28,.55);}
+  .foot-bar .copy{color:var(--muted-2);font-size:.72rem;}
+  .foot-bar .made{color:var(--muted-2);font-size:.72rem;display:flex;align-items:center;gap:6px;}
+  .foot-bar .made strong{color:var(--muted);font-weight:700;}
 
   .card{background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);
         border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);margin-bottom:16px;}
@@ -1067,7 +1095,12 @@ INDEX_HTML = """<!doctype html>
     .item{flex-wrap:wrap;}
     .actions{width:100%;justify-content:flex-start;}
     .time{min-width:auto;}
-    .brand h1{font-size:1.06rem;}
+    .brandname{font-size:1.02rem;}
+    .brandtag{font-size:.64rem;letter-spacing:.9px;}
+    .prod-pill{display:none;}
+    .foot-top{gap:16px;padding:16px 16px 14px;}
+    .foot-badges{max-width:100%;}
+    .foot-bar{flex-direction:column;align-items:flex-start;gap:6px;padding:11px 16px;}
     .phead{padding:10px 12px;}
     .ptitle .t{font-size:.82rem;}
     .cbtn{width:34px;height:34px;}
@@ -1081,13 +1114,18 @@ INDEX_HTML = """<!doctype html>
 <div class="app">
   <div class="topbar">
     <div class="brand">
-      <div class="logo">TAS</div>
+      <div class="logo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9A1.5 1.5 0 0 1 18.5 16H13l-3.4 3.1A.7.7 0 0 1 8.4 18.6V16H5.5A1.5 1.5 0 0 1 4 14.5v-9Zm6 2.6v4.8l4.2-2.4L10 8.1Z"/></svg>
+      </div>
       <div>
-        <h1>TeraBox Downloader</h1>
-        <div class="sub">by Tech Arslan Software Solutions</div>
+        <div class="brandname">TeraBox Downloader</div>
+        <div class="brandtag">Tech Arslan Software Solutions</div>
       </div>
     </div>
-    <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts">?</button>
+    <div class="brandside">
+      <span class="prod-pill"><span class="dot"></span>Fast &amp; Free</span>
+      <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts">?</button>
+    </div>
   </div>
 
   <div class="note">
@@ -1252,9 +1290,31 @@ INDEX_HTML = """<!doctype html>
 </div>
 
 <footer class="sitefoot">
-  <span>Built by <strong>Tech Arslan Software Solutions</strong></span>
-  <span class="dot">&bull;</span>
-  <span>TeraBox Downloader</span>
+  <div class="foot-top">
+    <div class="foot-brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9A1.5 1.5 0 0 1 18.5 16H13l-3.4 3.1A.7.7 0 0 1 8.4 18.6V16H5.5A1.5 1.5 0 0 1 4 14.5v-9Zm6 2.6v4.8l4.2-2.4L10 8.1Z"/></svg>
+      </div>
+      <div>
+        <div class="foot-name">Tech Arslan Software Solutions</div>
+        <div class="foot-tag">TeraBox Downloader</div>
+      </div>
+    </div>
+    <div class="foot-meta">
+      <span class="k">Developed by</span>
+      <span class="v">Tech Arslan Software Solutions</span>
+    </div>
+    <div class="foot-badges">
+      <span class="fchip">Fast streaming</span>
+      <span class="fchip">HD quality</span>
+      <span class="fchip">No ads</span>
+      <span class="fchip">Play next</span>
+    </div>
+  </div>
+  <div class="foot-bar">
+    <span class="copy">&copy; <span id="year"></span> Tech Arslan Software Solutions. All rights reserved.</span>
+    <span class="made">Made with care by <strong>Tech Arslan</strong></span>
+  </div>
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
@@ -1957,6 +2017,7 @@ pasteBtn.addEventListener('click', async () => {
 histClearBtn.addEventListener('click', () => { saveHistory([]); renderHistory(); });
 
 renderHistory();
+$('year').textContent = new Date().getFullYear();
 </script>
 </body>
 </html>
