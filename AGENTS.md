@@ -153,6 +153,26 @@ Other traps:
   If the service is switched to Railpack (Railway's current default) or
   Nixpacks (older), `railpack.json` / `nixpacks.toml` must supply `ffmpeg`
   themselves; the Dockerfile is ignored. All three are kept working.
+- **`deploy.aptPackages` needs the `"..."` entry.** Railpack replaces its
+  generated runtime package list with whatever you write. Writing
+  `["ffmpeg"]` drops everything Railpack installed at runtime, and `railpack
+  prepare` says so: `Add '...' to 'deploy.aptPackages' to retain Railpack
+  packages`. Keep `["...", "ffmpeg"]` in both `buildAptPackages` and
+  `deploy.aptPackages`.
+- **IPv6 private network.** Railway health-checks the container over its
+  private network, which is IPv6. gunicorn bound to `0.0.0.0` answers IPv4
+  only, so the check gets "connection refused" and the deploy is reported as
+  crashed while the process is healthy. `start.sh` binds `[::]` (dual-stack)
+  when the kernel supports it, falling back to `0.0.0.0`. Verified: with the
+  IPv4-only bind, `curl http://[::1]:$PORT/` inside the container is refused;
+  with the dual-stack bind it returns 200.
+- **Health check on `/` is expensive.** `/` renders the ~88 KB home page.
+  `/healthz` answers `{"ok": true}` and is what `railway.json` /
+  `render.yaml` point at.
+- **`requests` is a real dependency.** `terabox_app.py` imports it as the
+  fallback when `curl_cffi` is missing, so it is in `requirements.txt`; a
+  Railpack/Nixpacks build that installs only the listed packages needs it
+  there.
 
 ## Conventions
 

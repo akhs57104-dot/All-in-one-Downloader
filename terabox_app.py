@@ -586,6 +586,18 @@ def _hls_playlist(share: dict, chosen: dict):
 def index():
     return Response(INDEX_HTML, mimetype="text/html")
 
+
+@app.route("/healthz")
+def healthz():
+    """Cheap liveness probe for the host's health check.
+
+    `/` renders the ~88 KB home page; a health check should not pay for that on
+    every poll. This answers as soon as the worker can serve a request, which is
+    what tells the host the deploy is up.
+    """
+    return jsonify({"ok": True})
+
+
 @app.route("/api/resolve", methods=["POST"])
 def api_resolve():
     link = _request_link()

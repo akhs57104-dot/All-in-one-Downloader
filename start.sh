@@ -21,12 +21,33 @@ else
   exit 127
 fi
 
+# A host whose private network is IPv6 (Railway is) health-checks the container
+# over that network. gunicorn bound to 0.0.0.0 answers IPv4 only, so the check
+# gets "connection refused" and the deploy is marked failed even though the
+# process is healthy. Bind dual-stack when the kernel allows it.
+BIND_ADDR="0.0.0.0"
+if python3 - "${PORT}" <<'PY' 2>/dev/null
+import socket, sys
+port = int(sys.argv[1])
+s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+try:
+    s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+    s.bind(("::", port))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()
+PY
+then
+  BIND_ADDR="[::]"
+fi
+
 args=(
   --workers 1
   --threads 8
   --timeout 300
   --graceful-timeout 30
-  --bind "0.0.0.0:${PORT}"
+  --bind "${BIND_ADDR}:${PORT}"
   --access-logfile -
   --error-logfile -
 )
@@ -37,5 +58,5 @@ if "${GUNICORN[@]}" --help 2>&1 | grep -q -- "--no-control-socket"; then
   control="disabled"
 fi
 
-echo "[start.sh] ${GUNICORN[*]} on 0.0.0.0:${PORT} (control socket ${control})"
+echo "[start.sh] ${GUNICORN[*]} on ${BIND_ADDR}:${PORT} (control socket ${control})"
 exec "${GUNICORN[@]}" "${args[@]}" wsgi:app
