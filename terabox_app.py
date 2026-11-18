@@ -1154,8 +1154,16 @@ def detect_platform(url: str) -> str:
     return "other"
 
 
+FEATURED_KEYS = (
+    "youtube", "instagram", "facebook", "tiktok", "twitter", "whatsapp",
+    "snapchat", "linkedin", "pinterest", "reddit", "threads", "telegram",
+    "vimeo", "dailymotion", "twitch", "soundcloud",
+)
+
+
 def social_platform_list() -> list:
     return [{"key": k, "name": n, "color": c, "badge": b,
+             "featured": k in FEATURED_KEYS,
              "help": social_help(k, n)}
             for k, n, c, b, _r in SOCIAL_PLATFORMS]
 
@@ -1968,6 +1976,12 @@ INDEX_HTML = """<!doctype html>
   .platcount{background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:2px 10px;
         color:var(--muted);font-size:.68rem;letter-spacing:.4px;}
   .platforms{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:9px;}
+  /* Group labels sit inside the grid, so they must span every column. */
+  .platgroup{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin:8px 0 0;
+        color:var(--muted-2);font-size:.67rem;font-weight:800;text-transform:uppercase;letter-spacing:1.1px;}
+  .platgroup:first-child{margin-top:0;}
+  .platgroup::after{content:"";flex:1;height:1px;background:var(--border);}
+  .plat.feat{border-color:rgba(47,107,255,.34);}
   .plat{display:flex;align-items:center;gap:9px;padding:10px 11px;border-radius:12px;cursor:pointer;
         background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);
         color:var(--text);font-size:.78rem;font-weight:600;text-align:left;transition:.15s;min-width:0;}
@@ -1977,6 +1991,16 @@ INDEX_HTML = """<!doctype html>
         font-size:.62rem;font-weight:800;color:#fff;}
   .plat .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .platnote{color:var(--muted-2);font-size:.72rem;margin-top:9px;}
+  /* Popular row: the mainstream sites, one tap away above the input. */
+  .quickcard{margin-bottom:16px;}
+  .quickrow{display:flex;flex-wrap:wrap;gap:8px;}
+  .qplat{display:flex;align-items:center;gap:7px;padding:8px 11px;border-radius:999px;cursor:pointer;
+        background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid rgba(47,107,255,.3);
+        color:var(--text);font-size:.78rem;font-weight:600;transition:.15s;}
+  .qplat:hover{border-color:var(--primary);transform:translateY(-1px);}
+  .qplat.active{border-color:var(--primary);background:rgba(47,107,255,.16);}
+  .qplat .pd{width:20px;height:20px;flex-shrink:0;border-radius:6px;display:flex;align-items:center;justify-content:center;
+        font-size:.58rem;font-weight:800;color:#fff;}
   .platsearch{width:100%;padding:9px 12px;margin-bottom:10px;border:1px solid var(--border);
         border-radius:9px;background:var(--bg-2);color:var(--text);font-size:.82rem;outline:none;transition:.15s;}
   .platsearch::placeholder{color:var(--muted-2);}
@@ -2206,6 +2230,14 @@ INDEX_HTML = """<!doctype html>
       <h2>Download videos from any social platform</h2>
       <p>Paste a link from YouTube, Instagram, Facebook, TikTok, X and more. Play it right here when a
         single-file stream is available, or download it as an MP4.</p>
+    </div>
+
+    <div class="card quickcard">
+      <div class="plathead">
+        <span>Popular social media</span>
+        <span class="platcount" id="quickCount">—</span>
+      </div>
+      <div id="quickPlatforms" class="quickrow"></div>
     </div>
 
     <div class="social-grid">
@@ -3294,8 +3326,55 @@ function platBadge(key){
   return '<span class="pd" style="background:' + p.c + '">' + p.t + '</span>';
 }
 let allPlatforms = [];
+function makePlatButton(p){
+  S_PLAT[p.key] = {c: p.color, t: p.badge || (p.name || '?').slice(0, 2).toUpperCase()};
+  const b = document.createElement('button');
+  b.className = 'plat' + (p.featured ? ' feat' : '');
+  b.dataset.key = p.key;
+  b.innerHTML = platBadge(p.key) + '<span class="pn">' + esc(p.name) + '</span>';
+  b.title = 'Paste a ' + p.name + ' link';
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.plat').forEach(x => x.classList.toggle('active', x === b));
+    showPlatformHelp(p);
+    sLinkEl.focus();
+    sSetStatus('Paste the ' + p.name + ' link in the box, then press Get video.');
+  });
+  return b;
+}
+function platGroup(label){
+  const h = document.createElement('div');
+  h.className = 'platgroup';
+  h.textContent = label;
+  return h;
+}
+const quickEl = $('quickPlatforms'), quickCountEl = $('quickCount');
+function renderQuickPlatforms(list){
+  const featured = list.filter(p => p.featured);
+  quickEl.innerHTML = '';
+  quickCountEl.textContent = featured.length + ' sites';
+  for (const p of featured) {
+    S_PLAT[p.key] = {c: p.color, t: p.badge || (p.name || '?').slice(0, 2).toUpperCase()};
+    const b = document.createElement('button');
+    b.className = 'qplat';
+    b.dataset.key = p.key;
+    b.innerHTML = platBadge(p.key) + '<span class="pn">' + esc(p.name) + '</span>';
+    b.title = 'Paste a ' + p.name + ' link';
+    b.addEventListener('click', () => {
+      // Selecting a popular site scrolls to the input and focuses it, and
+      // mirrors the same "selected" state the sidebar picker uses.
+      document.querySelectorAll('.plat').forEach(x =>
+        x.classList.toggle('active', x.dataset.key === p.key));
+      showPlatformHelp(p);
+      sLinkEl.focus();
+      sLinkEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      sSetStatus('Paste the ' + p.name + ' link in the box, then press Get video.');
+    });
+    quickEl.appendChild(b);
+  }
+}
 function renderPlatforms(list){
   allPlatforms = list;
+  renderQuickPlatforms(list);
   const q = (platSearchEl.value || '').trim().toLowerCase();
   const shown = q ? list.filter(p => p.name.toLowerCase().includes(q)) : list;
   platformsEl.innerHTML = '';
@@ -3304,20 +3383,22 @@ function renderPlatforms(list){
     platformsEl.innerHTML = '<div class="empty">No platform matches "' + esc(q) + '".</div>';
     return;
   }
-  for (const p of shown) {
-    S_PLAT[p.key] = {c: p.color, t: p.badge || (p.name || '?').slice(0, 2).toUpperCase()};
-    const b = document.createElement('button');
-    b.className = 'plat';
-    b.dataset.key = p.key;
-    b.innerHTML = platBadge(p.key) + '<span class="pn">' + esc(p.name) + '</span>';
-    b.title = 'Paste a ' + p.name + ' link';
-    b.addEventListener('click', () => {
-      document.querySelectorAll('.plat').forEach(x => x.classList.toggle('active', x === b));
-      showPlatformHelp(p);
-      sLinkEl.focus();
-      sSetStatus('Paste the ' + p.name + ' link in the box, then press Get video.');
-    });
-    platformsEl.appendChild(b);
+  // Search results are a flat list; otherwise the mainstream sites lead in
+  // their own group and everything else follows, so the common ones are
+  // reachable without scrolling.
+  if (q) {
+    for (const p of shown) platformsEl.appendChild(makePlatButton(p));
+    return;
+  }
+  const featured = shown.filter(p => p.featured);
+  const rest = shown.filter(p => !p.featured);
+  if (featured.length) {
+    platformsEl.appendChild(platGroup('Popular social media'));
+    for (const p of featured) platformsEl.appendChild(makePlatButton(p));
+  }
+  if (rest.length) {
+    platformsEl.appendChild(platGroup('All other sites'));
+    for (const p of rest) platformsEl.appendChild(makePlatButton(p));
   }
 }
 
