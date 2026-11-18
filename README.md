@@ -35,12 +35,14 @@ PORT=12000 nohup ./run.sh > /tmp/techarslan.out 2>&1 &
 ```
 
 Managed hosts: `Dockerfile`, `Procfile`, `railway.json`, `railpack.json`,
-`nixpacks.toml` and `render.yaml` are ready for Railway, Render, Heroku and
-similar. All three Railway builders work:
+`nixpacks.toml`, `render.yaml` and `fly.toml` are ready for Railway, Render,
+Fly.io, Heroku and similar. All three Railway builders work:
 
 * **Dockerfile** - pinned in `railway.json`, bundles `ffmpeg`.
 * **Railpack** (Railway's current default) - `railpack.json` adds `ffmpeg`
-  to both the build and runtime images.
+  to both the build and runtime images. Keep the `"..."` entry in
+  `deploy.aptPackages`: without it the list replaces the runtime packages
+  Railpack generates.
 * **Nixpacks** (older) - `nixpacks.toml` adds `ffmpeg` via `aptPkgs`. Do not
   declare `nixPkgs` there: that replaces the setup phase Nixpacks generates
   for Python, and the build dies with `python: command not found`.
@@ -49,18 +51,24 @@ The container runs one gunicorn worker with threads via `start.sh`, which
 binds to the host's `$PORT`:
 
 ```
-gunicorn --workers 1 --threads 8 --timeout 300 --no-control-socket --bind 0.0.0.0:$PORT wsgi:app
+gunicorn --workers 1 --threads 8 --timeout 300 --no-control-socket --bind [::]:$PORT wsgi:app
 ```
 
-Two settings matter when a host reports the app as "crashed":
+Three settings matter when a host reports the app as "crashed":
 
-* **Bind to `$PORT`.** Never hardcode a port. Railway, Render and Fly inject
-  `$PORT` and health-check that exact port; an app listening on 12000 looks
-  dead to them.
+* **Bind to `$PORT`, dual-stack.** Never hardcode a port. Railway, Render and
+  Fly inject `$PORT` and health-check that exact port; an app listening on
+  12000 looks dead to them. A host whose private network is IPv6 (Railway)
+  also needs the IPv6 listen address, so `start.sh` binds `[::]` when the
+  kernel allows it and falls back to `0.0.0.0`.
+* **Health check on `/healthz`, not `/`.** `/` renders the ~88 KB home page;
+  `/healthz` answers `{"ok": true}`. `railway.json`, `render.yaml` and
+  `fly.toml` point their checks at it.
 * **Readable files, non-root user.** The image does `chmod -R a+rX /app` and
   runs as `appuser`. A checkout whose files are mode `0600` (owner-only) makes
   gunicorn die with `PermissionError: /app/wsgi.py` when the platform runs it
-  as an unprivileged uid.
+  as an unprivileged uid. Every builder starts through `bash ./start.sh`, so a
+  missing exec bit cannot fail the boot either.
 
 `start.sh` also only passes `--no-control-socket` when the installed gunicorn
 supports it; gunicorn below 23 exits with `unrecognized arguments` otherwise.

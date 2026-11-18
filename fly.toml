@@ -1,0 +1,37 @@
+# Fly.io config. Deploy with:
+#
+#   fly launch --no-deploy --copy-config --name <your-app>
+#   fly deploy
+#
+# The Dockerfile bundles ffmpeg, so yt-dlp can merge separate video and audio
+# tracks. start.sh reads $PORT and binds dual-stack, so the internal port here
+# has to match the PORT below.
+app = "tech-arslan-software-solutions"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  TERABOX_FALLBACK = "on"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.checks]
+    [http_service.checks.healthz]
+      interval = "15s"
+      timeout = "5s"
+      grace_period = "20s"
+      method = "GET"
+      path = "/healthz"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
