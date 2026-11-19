@@ -140,20 +140,36 @@ after 15 minutes without traffic, while alwaysdata's Free plan is sold as "0 €
 
 1. Sign up at <https://www.alwaysdata.com/en/register/> and pick the **Free**
    offer. The signup form asks only for an email and a password - there is no
-   card field.
-2. **Web → Sites → Add a site**: type **Python WSGI**, point the application
-   path at `/home/<account>/techarslan/wsgi.py`.
-3. Upload the code over SFTP/SSH, then in a shell:
+   card field. This is the one step that cannot be automated: the verification
+   mail goes to your inbox.
 
-   ```bash
-   cd ~/techarslan
-   python -m venv venv && . venv/bin/activate
-   pip install -r requirements.txt
-   ```
+Everything after that is scripted. Two scripts do the work, and both read
+credentials from the environment only:
 
-4. **Web → Sites →** the site → **Environment**: set `TERABOX_FALLBACK=on` (and
-   `TERABOX_COOKIE` if you have one).
-5. The site answers at `https://<account>.alwaysdata.net`.
+```bash
+# 1. create the WSGI site (Profile -> Access tokens -> create one)
+ALWAYSDATA_TOKEN=xxx python3 deploy_alwaysdata.py --dry-run   # show the request
+ALWAYSDATA_TOKEN=xxx python3 deploy_alwaysdata.py             # create it
+
+# 2. upload the code and build the virtualenv
+ALWAYSDATA_ACCOUNT=myaccount ./deploy_alwaysdata.sh
+```
+
+`deploy_alwaysdata.py` authenticates with HTTP Basic, using the token as the
+username and an empty password - alwaysdata requires the trailing colon
+(`curl --basic --user APIKEY:`). It creates a `wsgi` site at
+`/techarslan/wsgi.py`, sets `TERABOX_FALLBACK=on`, forces HTTPS, and raises
+`max_idle_time` from its 1800-second default to 6 hours so the first visit after
+a quiet spell is not a cold start.
+
+`deploy_alwaysdata.sh` rsyncs the tree to `~/techarslan` and runs
+`pip install -r requirements.txt` in a virtualenv there, then imports `wsgi.app`
+to prove the app loads. It needs a public key on the account; if SSH is refused
+it says so instead of leaving a half-uploaded tree behind.
+
+To do it by hand instead: **Web → Sites → Add a site**, type **Python WSGI**,
+application path `/home/<account>/techarslan/wsgi.py`, then upload the code and
+install the requirements yourself.
 
 Two things to know about this host:
 
