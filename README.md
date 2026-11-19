@@ -115,6 +115,27 @@ neither can host it well:
 
 A long-running download server needs the Northflank or Render setup above.
 
+### A URL that survives a restart, with no account
+
+A Cloudflare quick tunnel is free but its hostname is new on every restart.
+localtunnel lets you *ask for* a subdomain, so the address is the same every
+time:
+
+```
+https://tech-arslan-software-solutions.loca.lt
+```
+
+`serve.sh` starts localtunnel first and cloudflared second, then keeps both
+alive. The requested subdomain is written to `/tmp/techarslan-url.txt` and the
+cloudflared address to `/tmp/techarslan-cf-url.txt`.
+
+The trade-off is real and worth knowing before you share the link: localtunnel
+shows every new visitor a one-time "Tunnel website ahead" page that asks them to
+click Continue. Any HTTP client can skip it with the header
+`bypass-tunnel-reminder: true`, but a person on a phone sees the page once. If
+that is unacceptable, hand out the cloudflared address instead - it has no
+interstitial but changes whenever the tunnel restarts.
+
 ### Cloudflare - good tunnel, wrong product for hosting
 
 Cloudflare is the best *tunnel* here, and the worst *host*.
