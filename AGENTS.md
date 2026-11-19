@@ -221,6 +221,50 @@ Other traps:
   YouTube *downloads* answer 403 from a datacenter IP even locally, which is a
   YouTube-side block, not an app bug; direct-file and non-YouTube links work.
 
+## Hosting facts (measured, not from marketing pages)
+
+The user's original complaint was "link not working", and the app was never at
+fault. Diagnose a dead host URL before touching code.
+
+**A Render 404 means the service was never created.** `https://<name>.onrender.com`
+answering 404 returns the exact same body as a hostname that never existed, so it
+is not a crash and not a failed health check - there is nothing deployed. A
+deploy that failed shows a Render error page instead. Two things stop creation:
+the blueprint review screen was never submitted, or the account needs payment
+details (the API answers 402).
+
+**GitHub push is read-only from this environment.** `GITHUB_TOKEN` reports
+`permissions: {push: true}` on the repo, but `git push` returns 403 and the
+Contents API returns "Resource not accessible by integration".
+`OH_GIT_CREDENTIAL_ACCESS_TOKEN_GITHUB` is rejected too ("Invalid username or
+token"). So commits stay local and the remote `main` drifts behind - check
+`git branch -r --contains HEAD` before claiming a change is on GitHub. Never
+report a commit as deployed when it only exists locally.
+
+**Free hosts, checked against each host's own docs:**
+
+| Host | Verdict |
+| --- | --- |
+| alwaysdata | Free 0 EUR/month for life, no card field at signup, `wsgi` site type, 256 MB RAM, no Docker |
+| Render | Free, no card, but stops a service after 15 idle minutes; 512 MB |
+| Hugging Face Spaces | Compute Spaces need a paid plan; only static is free |
+| Koyeb | Free allowance is gated behind a card |
+| PythonAnywhere | Free account has restricted outbound access - fatal here |
+| Vercel / Netlify | No long-lived process; the in-memory caches this app needs die |
+
+**alwaysdata API specifics** (all from `https://api.alwaysdata.com/v1/site/doc/`):
+
+- Auth is HTTP Basic with the token as the username and an empty password. The
+  trailing colon is required: `curl --basic --user APIKEY:`.
+- A site's `addresses` field is a **list of plain hostname strings**, not objects.
+- A site has **no `name` field**; the label is `annotation`.
+- `max_idle_time` defaults to **1800** seconds, after which the application is
+  stopped. Raise it or the first visit after a quiet spell is a cold start.
+
+`deploy_alwaysdata.py` and `deploy_alwaysdata.sh` implement the above. Signup is
+the only step that cannot be scripted, because the verification mail goes to the
+account owner.
+
 ## Conventions
 
 - Keep it a single file; no build step.
