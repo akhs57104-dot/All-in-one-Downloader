@@ -1,12 +1,29 @@
 # Render blueprint: connect this repo and Render builds it automatically.
 # Docs: https://render.com/docs/blueprint-spec
-# Docker runtime (not the plain Python runtime) so ffmpeg is bundled and
-# yt-dlp can merge separate video and audio tracks.
+#
+# Docker runtime (not the plain Python runtime) so ffmpeg is bundled and yt-dlp
+# can merge separate video and audio tracks.
+#
+# If the service builds but the URL never opens, the cause is almost always one
+# of these, in order of likelihood:
+#
+#   1. The service was never created. A 404 from https://<name>.onrender.com
+#      means nothing is deployed yet - the blueprint was not applied.
+#   2. The free instance is spun down. Render stops a Free web service after 15
+#      minutes without traffic and needs about a minute to wake it again; the
+#      first visit shows a loading page, not an error.
+#   3. The health check fails. /healthz must answer 200 within the boot window;
+#      `sudo docker run -e PORT=10000 -p 10000:10000 <image>` reproduces the
+#      container locally to confirm the app itself is fine.
+#
+# `region` and `autoDeploy` are spelled out so a re-apply cannot drift.
 services:
   - type: web
     name: tech-arslan-software-solutions
     runtime: docker
     plan: free
+    region: oregon
+    autoDeploy: true
     dockerfilePath: ./Dockerfile
     healthCheckPath: /healthz
     envVars:

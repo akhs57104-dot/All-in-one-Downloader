@@ -41,11 +41,14 @@ Fly.io, Heroku and similar.
 ## Free hosting that stays up
 
 Free hosting splits into two groups: hosts that want a card on file even on the
-free plan (Northflank), and hosts that do not (Render). Both build the bundled
-`Dockerfile`, so `ffmpeg` comes along.
+free plan (Northflank, Koyeb), and hosts that do not (Render, alwaysdata). The
+Docker hosts build the bundled `Dockerfile`, so `ffmpeg` comes along.
 
-**If you have no card, use Render.** It is the only option here that both stays
-free and asks for no payment details.
+**If you have no card, you have two options.** Render is the easier one to start
+and keeps `ffmpeg` for free, but it spins down after 15 idle minutes and its
+dashboard sometimes refuses to create the service. alwaysdata is 0 €/month for
+life, never asks for a card, and does not spin down, but has no Docker (install
+`ffmpeg` by hand) and only 256 MB of RAM.
 
 ### Northflank - free plan, but a card is required
 
@@ -95,6 +98,95 @@ RENDER_API_KEY=rnd_xxx python3 deploy_render.py --watch     # create and wait
 The key comes from <https://dashboard.render.com/u/settings#api-keys> and is
 read from the environment only. A `402` from the API means Render wants payment
 details on that account; the free plan itself does not ask for them.
+
+### Render says "not found" - the service was never created
+
+If `https://<name>.onrender.com` answers **404 Not Found**, nothing is deployed
+there. That 404 is byte-for-byte the same response a name that never existed
+returns, so it is not the app crashing and not the health check failing - the
+service simply is not there. A deploy that failed would show a Render error page
+or a "service unavailable" screen instead.
+
+The two things that stop the service from being created:
+
+- **The blueprint was never applied.** Opening `render.com/deploy?repo=...` only
+  shows the review screen; the service exists once that screen is submitted.
+- **The account needs payment details.** Render's API answers `402` and the
+  dashboard asks for a card. The Free plan does not normally require one, but
+  accounts flagged for verification do, and there is no way around it from the
+  API.
+
+Confirm locally that the app itself is fine before blaming the host - this
+reproduces Render's own run (`$PORT`, non-root user, health check):
+
+```bash
+sudo docker build -t techarslan .
+sudo docker run -d --name t1 -e PORT=10000 -p 10000:10000 techarslan
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:10000/healthz   # 200
+```
+
+### alwaysdata - free forever, no card, no documented spin-down
+
+alwaysdata's Free plan is **0 €/month for life**: 1 GB SSD, 256 MB RAM, and no
+payment details at any point. It runs Python 2.4-3.14 behind uWSGI and offers a
+**Python WSGI** site type, which is exactly what `wsgi.py` provides. Flask is one
+of its auto-installable applications. The app idles around 75 MB, so 256 MB is
+enough.
+
+This is the only option here that is free, card-free **and** not subject to a
+documented idle spin-down: Render states plainly that it stops a Free web service
+after 15 minutes without traffic, while alwaysdata's Free plan is sold as "0 €
+/month ... for life" with no such statement.
+
+1. Sign up at <https://www.alwaysdata.com/en/register/> and pick the **Free**
+   offer. The signup form asks only for an email and a password - there is no
+   card field.
+2. **Web → Sites → Add a site**: type **Python WSGI**, point the application
+   path at `/home/<account>/techarslan/wsgi.py`.
+3. Upload the code over SFTP/SSH, then in a shell:
+
+   ```bash
+   cd ~/techarslan
+   python -m venv venv && . venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+4. **Web → Sites →** the site → **Environment**: set `TERABOX_FALLBACK=on` (and
+   `TERABOX_COOKIE` if you have one).
+5. The site answers at `https://<account>.alwaysdata.net`.
+
+Two things to know about this host:
+
+- **No Docker**, so `ffmpeg` is not bundled - but it can be installed, and
+  alwaysdata documents how: download the static build into `~/ffmpeg`, and add
+  that directory to `PATH` in the site's environment.
+
+  ```bash
+  mkdir -p ~/ffmpeg && cd ~/ffmpeg
+  wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+  tar -xJf ffmpeg-release-amd64-static.tar.xz --strip-components=1
+  rm ffmpeg-release-amd64-static.tar.xz
+  ```
+
+  Without it, downloads still work; yt-dlp only loses the ability to merge
+  separate video and audio tracks into a single file.
+- **256 MB RAM**. A merge of a long video can approach that. If it does, prefer
+  single-file formats and keep `TERABOX_FALLBACK=on`.
+
+### Hosts that look free but are not usable here
+
+Checked against each host's own docs, because the marketing pages disagree:
+
+- **Hugging Face Spaces** - the hardware table lists CPU Basic as "Free!", but
+  the same page adds that *"creating a new Space that runs on compute (Gradio or
+  Docker) requires a paid plan. Static Spaces are free for everyone."* A static
+  Space cannot run Flask.
+- **Koyeb** - its own pricing FAQ contains the question *"Why does Koyeb require
+  a credit card?"*, so the free allowance is gated behind a card.
+- **PythonAnywhere** - the free "Beginner" account is described as giving *"two
+  consoles with restricted outbound Internet access"*. Every download this app
+  performs is outbound, so it cannot work there.
+- **Vercel / Netlify** - see below; no long-lived process.
 
 ### Why not Vercel or Netlify
 
