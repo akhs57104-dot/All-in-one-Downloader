@@ -41,14 +41,22 @@ Fly.io, Heroku and similar.
 ## Free hosting that stays up
 
 Free hosting splits into two groups: hosts that want a card on file even on the
-free plan (Northflank, Koyeb), and hosts that do not (Render, alwaysdata). The
-Docker hosts build the bundled `Dockerfile`, so `ffmpeg` comes along.
+free plan (Northflank, Koyeb), and hosts that do not (Render, SnapDeploy,
+alwaysdata). The Docker hosts build the bundled `Dockerfile`, so `ffmpeg` comes
+along.
 
-**If you have no card, you have two options.** Render is the easier one to start
-and keeps `ffmpeg` for free, but it spins down after 15 idle minutes and its
-dashboard sometimes refuses to create the service. alwaysdata is 0 €/month for
-life, never asks for a card, and does not spin down, but has no Docker (install
-`ffmpeg` by hand) and only 256 MB of RAM.
+**If you have no card, there are three options**, and they fail in different
+ways:
+
+| Host | Good | Bad |
+| --- | --- | --- |
+| SnapDeploy | Docker + `ffmpeg`, 512 MB, deploys from the repo | sleeps after 15 min, 100 hours/month |
+| Render | Docker + `ffmpeg`, 512 MB, easy dashboard | sleeps after 15 min, dashboard sometimes will not create the service |
+| alwaysdata | no sleep, 0 €/month for life | no Docker (install `ffmpeg` by hand), 256 MB |
+
+SnapDeploy and Render sleep but a browser visit wakes them, so an uptime pinger
+helps there. alwaysdata does not sleep, but its `max_idle_time` stops an idle
+application unless it is raised - `deploy_alwaysdata.py` raises it to 6 hours.
 
 ### Northflank - free plan, but a card is required
 
@@ -124,6 +132,51 @@ sudo docker build -t techarslan .
 sudo docker run -d --name t1 -e PORT=10000 -p 10000:10000 techarslan
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:10000/healthz   # 200
 ```
+
+### SnapDeploy - Docker host, free tier, no card
+
+SnapDeploy runs Docker on AWS and its free tier is a Small container: **512 MB
+RAM, 0.25 vCPU, no credit card**, 4 containers, 10 deploys a day (5 per rolling
+12 hours) and 100 container-hours a month. It builds the bundled `Dockerfile`,
+so `ffmpeg` comes along and the app fits with room to spare - it idles at about
+75 MB.
+
+Sign up at <https://snapdeploy.dev/register> (GitHub one-tap or email; the page
+states "Free on a Small container, no card needed"), then create a token with
+the `deploy` scope at <https://snapdeploy.dev/api-keys>.
+
+```bash
+SNAPDEPLOY_API_KEY=sd_pat_... python3 deploy_snapdeploy.py --dry-run
+SNAPDEPLOY_API_KEY=sd_pat_... python3 deploy_snapdeploy.py
+```
+
+The container name becomes the URL:
+`https://tech-arslan-software-solutions.containers.snapdeploy.app`.
+
+The API has no prose documentation, so the paths, the `X-API-Key` header and the
+payloads in `deploy_snapdeploy.py` were read out of the official MCP client
+(`@snapdeploy/mcp`, `dist/tools.js`) instead of guessed:
+
+| Call | Purpose |
+| --- | --- |
+| `GET /api/mobile/bootstrap` | plan, containers, quota, deploy cap |
+| `GET /api/mobile/deploy-cap` | deploys left in the rolling window |
+| `POST /api/mobile/deploy` | `{repo, name, branch, env, port, size}` |
+| `GET /api/mobile/containers/<id>` | status, URL, port |
+| `GET /api/mobile/deployments/<id>` | build log tail, error message |
+
+Two things to know:
+
+- **Free containers sleep after ~15 minutes of no traffic** and wake in about a
+  minute. A sleeping container answers `503` and only a real browser visit
+  triggers the wake - uptime pingers and cron jobs get the `503` and do not wake
+  it. So the Render-style pinger trick does not work here.
+- **Cloudflare fronts the domain** and answers `403` (error 1010) to
+  `Python-urllib/x.y`, so any script calling this API must set its own
+  `User-Agent`.
+
+The 100 monthly container-hours are a real limit: an app awake 8 hours a day
+would use ~240 hours and run out mid-month. A few visits a day uses roughly 30.
 
 ### alwaysdata - free forever, no card, no documented spin-down
 
