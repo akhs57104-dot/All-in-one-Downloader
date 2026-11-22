@@ -49,7 +49,7 @@ import threading
 import time
 import urllib.parse
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, request, send_file
 
 # TeraBox fronts its API with a WAF that can reject Python's TLS fingerprint
 # before it ever reads the headers. curl_cffi impersonates a real browser
@@ -650,6 +650,31 @@ account data, there is nothing further for us to delete on your behalf.</p>
 support@techarslan.example</a></p>
 </body></html>
 """
+
+
+@app.route("/download-apk")
+def download_apk():
+    """Serve the built APK, so the phone can install it without a file transfer.
+
+    This is direct distribution, which sidesteps the Play review risk entirely.
+    The newest file in `dist/` wins, so dropping a new APK there is the whole
+    release process for sideloading.
+    """
+    folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist")
+    try:
+        candidates = [f for f in os.listdir(folder) if f.endswith(".apk")]
+    except OSError:
+        candidates = []
+    if not candidates:
+        return jsonify({"ok": False, "error": "No APK has been built yet."}), 404
+    # A debug build is newer than the release it sits next to but must never be
+    # handed out: it is debuggable and signed with the throwaway debug key.
+    releases = [f for f in candidates if "debug" not in f.lower()]
+    pool = releases or candidates
+    newest = max(pool, key=lambda f: os.path.getmtime(os.path.join(folder, f)))
+    return send_file(os.path.join(folder, newest),
+                     mimetype="application/vnd.android.package-archive",
+                     as_attachment=True, download_name=newest)
 
 
 @app.route("/privacy")
