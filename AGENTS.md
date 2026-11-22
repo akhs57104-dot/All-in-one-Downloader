@@ -378,14 +378,16 @@ already-installed APKs, so repo and backend must not move simultaneously.
 It states the app collects nothing, which matches the actual permission list
 (INTERNET + ACCESS_NETWORK_STATE only).
 
-**Git push is blocked by the credentials in this environment.** Both
-`GITHUB_TOKEN` and `OH_GIT_CREDENTIAL_ACCESS_TOKEN_GITHUB` fail to push to
-`akhs57104-dot/All-in-one-Downloader`: the API reports
-`admin/maintain/push: true` for the repo, yet git returns 403 and the refs API
-returns "Resource not accessible by integration", so the token is effectively
-read-only for writes. Local commits are safe and the site runs from the working
-tree, but they stay local until a writable credential is supplied. Do not burn
-time retrying the push; confirm with the user first.
+**`GITHUB_TOKEN` here is a GitHub App installation token and cannot push.**
+`x-oauth-scopes` comes back empty, the API still reports `push: true`, and git
+answers 403 "Resource not accessible by integration". A user-supplied fine-grained
+PAT with Contents: Read and write does push. One trap: such a PAT also needs the
+**Workflows** permission, or GitHub rejects any commit that touches
+`.github/workflows/` with "refusing to allow a Personal Access Token to create or
+update workflow". Commits that do not touch a workflow file push fine, which is a
+usable workaround — drop the workflow from the commit, push the rest, and add the
+workflow once the token has the scope. Pass the token through `GIT_ASKPASS` rather
+than embedding it in the remote URL, and never write it into the repo.
 
 **TeraBox is verified end to end against real public share links**, and doing
 that found a real bug. Two working MP4 shares and six ZIP shares were resolved
