@@ -314,6 +314,27 @@ ready for when it returns. Two details that cost time: ffmpeg is not in the base
 image, so the build command installs it; and `gunicorn` may not be on `PATH` even
 when installed, so use `python3 -m gunicorn`.
 
+**The app is deployed and live at https://web-production-ac65b984.up.railway.app.**
+Railway project `tech-arslan-software-solutions`, service `web`, deployment
+SUCCESS, verified on the running instance: `/healthz` 200, `/` 200, 156
+platforms with `"ffmpeg": true`, three separate sources resolve, and
+`/api/social/download` returns 788,493 bytes of valid `video/mp4`. The UI was
+also exercised in a browser: a link resolves to a title with Play and Download
+buttons, and the TeraBox tab renders. Redeploy with
+`RAILWAY_TOKEN=... python3 deploy_railway.py`.
+
+Three things about this token type, learned by hitting them: a workspace token
+(`rlwy_wksp_...`) authenticates but answers "Not Authorized" on `me`, because
+`me` describes a user; `projectCreate` infers the workspace from the token so no
+workspaceId is needed; and a fresh service has no public domain until
+`serviceDomainCreate` runs with `targetPort` matching PORT. Railway also 403s
+Python-urllib's default user agent on `__schema`, so send a browser agent.
+
+**YouTube specifically fails from Railway** - it answers "this site wants a
+signed-in session", which the app reports as a cookie hint. That is the
+datacenter IP, not the code. Set `SOCIAL_COOKIES` to a cookies.txt to get past
+it. Every other source tested works.
+
 **Railway's build is verified, not assumed.** The Dockerfile builds, and the
 container answers 200 on `/healthz` and `/` with `PORT=8080`, binding dual-stack
 (`[start.sh] gunicorn on [::]:8080`). Inside it: ffmpeg 7.1.5,
