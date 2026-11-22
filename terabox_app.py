@@ -635,7 +635,8 @@ def _branded(filename: str) -> str:
 
 
 def _proxy_stream(upstream, *, as_attachment: bool, filename: str,
-                  content_type: str | None = None) -> Response:
+                  content_type: str | None = None,
+                  prefix: bytes = b"") -> Response:
     """Relay an upstream response, preserving Range/length semantics."""
     headers = {
         "Content-Type": content_type or upstream.headers.get(
@@ -651,6 +652,8 @@ def _proxy_stream(upstream, *, as_attachment: bool, filename: str,
 
     def body():
         try:
+            if prefix:
+                yield prefix
             for chunk in upstream.iter_content(chunk_size=256 * 1024):
                 if chunk:
                     yield chunk
@@ -738,17 +741,28 @@ def _serve(link: str, fs_id: str, *, mode: str):
             helper_error = exc
         else:
             if mode == "download":
-                # The helper's stream is a transcoded MPEG-TS, not the original
-                # container, so it is offered with a .ts extension.
+                # The helper's container varies: some files come back as the
+                # original MP4, others as a transcoded MPEG-TS. Sniff the first
+                # chunk so the name and type match the bytes actually sent.
                 headers = {"User-Agent": BROWSER_UA}
                 if request.headers.get("Range"):
                     headers["Range"] = request.headers["Range"]
                 upstream = _request_session().get(info["dl"], headers=headers,
                                                   stream=True, timeout=60)
                 if upstream.status_code in (200, 206):
+                    head = next(upstream.iter_content(chunk_size=65536), b"") or b""
+                    kind = _sniff_media(head)
+                    if kind:
+                        filename = _with_ext(name, kind[0])
+                        content_type = kind[1]
+                    else:
+                        filename = name
+                        content_type = upstream.headers.get(
+                            "Content-Type", "application/octet-stream")
                     return _proxy_stream(upstream, as_attachment=True,
-                                         filename=_ts_name(name),
-                                         content_type="video/mp2t")
+                                         filename=filename,
+                                         content_type=content_type,
+                                         prefix=head)
                 upstream.close()
                 helper_error = TeraBoxError(
                     f"The helper returned status {upstream.status_code} for the file.")
@@ -775,10 +789,35 @@ def _serve(link: str, fs_id: str, *, mode: str):
     return jsonify({"ok": False, "error": str(error) if error
                     else "No stream is available for that file."}), 400
 
-def _ts_name(name: str) -> str:
-    """Give a transcoded stream a .ts name so players expect the right format."""
-    base = name.rsplit(".", 1)[0] if "." in name else name
-    return base + ".ts"
+def _sniff_media(head: bytes) -> tuple[str, str] | None:
+    """Identify a media container from its first bytes.
+
+    Returns `(extension, content_type)`, or None when the bytes are not a
+    container we recognise, so the caller can fall back to the upstream's own
+    headers. TeraBox helpers serve both the original MP4 and a transcoded
+    MPEG-TS depending on the file, so the container cannot be assumed.
+    """
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        brand = head[8:12]
+        if brand in (b"qt  ",):
+            return ".mov", "video/quicktime"
+        return ".mp4", "video/mp4"
+    if head[:4] == b"\x1a\x45\xdf\xa3":
+        return ".webm", "video/webm"
+    if head[:4] == b"RIFF" and head[8:12] == b"AVI ":
+        return ".avi", "video/x-msvideo"
+    # MPEG-TS: 0x47 sync byte every 188 bytes. Check a run of packets so a
+    # stray 0x47 in unrelated data cannot match.
+    if head[:1] == b"\x47" and len(head) >= 188 * 3:
+        if all(head[i] == 0x47 for i in range(0, 188 * 3, 188)):
+            return ".ts", "video/mp2t"
+    return None
+
+
+def _with_ext(name: str, ext: str) -> str:
+    """Swap a filename's extension, keeping the stem."""
+    stem = name.rsplit(".", 1)[0] if "." in name else name
+    return f"{stem}{ext}"
 
 def _fetch_playlist(url: str):
     """Proxy a helper's HLS playlist through this server, or return None."""

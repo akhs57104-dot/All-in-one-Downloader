@@ -355,6 +355,26 @@ by an 788,493-byte download.
 Do not re-run this investigation: the nine-client probe and the bgutil build
 both take ~15 minutes and land on 403 every time.
 
+**TeraBox is verified end to end against real public share links**, and doing
+that found a real bug. Two working MP4 shares and six ZIP shares were resolved
+from public GitHub READMEs. Findings:
+
+- The primary TeraBox resolver works without a cookie: a real share resolved to
+  1 file with `"source": "terabox"`, so the playterabox fallback was not used.
+- `_serve` used to stamp every helper download as `.ts` / `video/mp2t` on the
+  assumption the helper transcodes to MPEG-TS. It does not - an MP4 share came
+  back as `ftypisom...avc1mp41`, and a ZIP share came back as `PK..`. The app was
+  handing users a correct MP4 named `.ts` with `video/mp2t`, which players then
+  refused. `_sniff_media()` now reads the first 64 KB and picks the real
+  extension and content type, replaying that chunk through `_proxy_stream`'s
+  `prefix` argument. Unknown bytes fall back to the upstream's own headers.
+- Re-verified after the fix: MP4 share -> `video/mp4`, 2,321,282 bytes, valid
+  `ftyp`; ZIP share -> `application/zip`, valid `PK`; `Range: bytes=0-1023` ->
+  206 with exact `Content-Range: bytes 0-1023/2321282`; `/api/hls` playlist ->
+  200 and its first segment is a real MPEG-TS (0x47 every 188 bytes).
+- An invalid share id fails cleanly, and a non-TeraBox host is rejected with
+  "That does not look like a TeraBox share link."
+
 **Railway's build is verified, not assumed.** The Dockerfile builds, and the
 container answers 200 on `/healthz` and `/` with `PORT=8080`, binding dual-stack
 (`[start.sh] gunicorn on [::]:8080`). Inside it: ffmpeg 7.1.5,
