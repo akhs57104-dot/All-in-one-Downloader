@@ -229,6 +229,17 @@ INFRLO_COOKIE='...' python3 deploy_infrlo.py --dry-run
 INFRLO_COOKIE='...' python3 deploy_infrlo.py
 ```
 
+### Live now: https://web-production-ac65b984.up.railway.app
+
+Deployed on Railway and verified against the running instance, not a local build:
+deployment **SUCCESS**, `/healthz` **200**, `/` **200**, **156** platforms with
+`"ffmpeg": true`, three separate sources resolve, and `/api/social/download`
+returns **788,493 bytes of valid `video/mp4`**.
+
+YouTube is the one failure there, and it is the network rather than the app: from
+Railway it answers "this site wants a signed-in session", which the app surfaces
+as a cookie hint. Every datacenter IP is treated this way by YouTube.
+
 ### Railway - no card, no downloader ban, and the build is verified
 
 Railway is the best fit found so far. **Its terms do not name downloaders.**
