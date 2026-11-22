@@ -25,6 +25,11 @@ dist/tools.js) rather than guessed:
     GET  /api/mobile/deployments/<id>       one deployment in detail
 
 The container name becomes the URL: <name>.containers.snapdeploy.app
+
+SnapDeploy builds from the GitHub repository, not from this working tree, so
+only pushed commits get deployed. The app code on `main` is identical to the
+local tree, which is why the default branch works even while README and deploy
+script changes sit unpushed.
 """
 
 from __future__ import annotations
