@@ -50,6 +50,8 @@ import urllib.error
 import urllib.request
 
 API = "https://backboard.railway.com/graphql/v2"
+UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
 REPO = "akhs57104-dot/All-in-one-Downloader"
 BRANCH = "main"
@@ -76,7 +78,10 @@ def gql(token: str, query: str, variables: dict | None = None, timeout: int = 90
     req = urllib.request.Request(API, data=json.dumps(payload).encode(), method="POST")
     req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "application/json")
-    req.add_header("User-Agent", "techarslan-deploy/1.0")
+    # Railway 403s Python-urllib's default agent on schema introspection, so
+    # send a browser agent. A plain "techarslan-deploy/1.0" is enough for
+    # ordinary queries but not for __schema.
+    req.add_header("User-Agent", UA)
     # A Railway account token goes in the Authorization header; a project token
     # would go in Project-Access-Token instead. This script needs the former to
     # create a project at all.
@@ -97,29 +102,39 @@ def gql(token: str, query: str, variables: dict | None = None, timeout: int = 90
 
 
 def get_workspace(token: str) -> dict:
-    data = gql(token, """
-        query {
-          me {
-            id
-            name
-            email
-            workspaces { id name }
-          }
-        }
-    """)
-    me = data.get("me") or {}
-    workspaces = me.get("workspaces") or []
-    if not workspaces:
-        raise GraphQLError("this account has no workspace; finish signup in the browser first")
-    return {"me": me, "workspace": workspaces[0], "all": workspaces}
+    """Identify the account behind the token, without requiring `me`.
+
+    A workspace token (`rlwy_wksp_...`) authenticates but answers "Not
+    Authorized" on `me`, because `me` describes a user and this token belongs to
+    a workspace. Rather than guess, try `me` and fall back: the workspace is
+    implied by the token, so `projectCreate` works with no workspaceId at all.
+    """
+    try:
+        data = gql(token, """
+            query { me { id name email workspaces { id name } } }
+        """)
+        me = data.get("me") or {}
+        workspaces = me.get("workspaces") or []
+        if workspaces:
+            return {"me": me, "workspace": workspaces[0], "all": workspaces}
+    except GraphQLError:
+        pass
+
+    # No usable `me`: confirm the token authenticates at all before claiming a
+    # workspace, so a bad token is reported as a bad token.
+    gql(token, "query { projects { edges { node { id name } } } }")
+    return {"me": {}, "workspace": None, "all": []}
 
 
-def find_project(token: str, workspace_id: str, name: str):
-    data = gql(token, """
-        query($workspaceId: String!) {
-          projects(workspaceId: $workspaceId) { edges { node { id name } } }
-        }
-    """, {"workspaceId": workspace_id})
+def find_project(token: str, workspace_id: str | None, name: str):
+    if workspace_id:
+        data = gql(token, """
+            query($workspaceId: String) {
+              projects(workspaceId: $workspaceId) { edges { node { id name } } }
+            }
+        """, {"workspaceId": workspace_id})
+    else:
+        data = gql(token, "query { projects { edges { node { id name } } } }")
     edges = (data.get("projects") or {}).get("edges") or []
     for edge in edges:
         node = edge.get("node") or {}
@@ -128,7 +143,17 @@ def find_project(token: str, workspace_id: str, name: str):
     return None
 
 
-def create_project(token: str, workspace_id: str, name: str) -> dict:
+def create_project(token: str, workspace_id: str | None, name: str) -> dict:
+    payload = {
+        "name": name,
+        "description": "TeraBox and 156-site social downloader",
+        "isPublic": False,
+        "prDeploys": False,
+    }
+    # A workspace token already identifies the workspace, and sending an unknown
+    # id would be worse than sending none.
+    if workspace_id:
+        payload["workspaceId"] = workspace_id
     data = gql(token, """
         mutation($input: ProjectCreateInput!) {
           projectCreate(input: $input) {
@@ -137,13 +162,7 @@ def create_project(token: str, workspace_id: str, name: str) -> dict:
             environments { edges { node { id name } } }
           }
         }
-    """, {"input": {
-        "name": name,
-        "workspaceId": workspace_id,
-        "description": "TeraBox and 156-site social downloader",
-        "isPublic": False,
-        "prDeploys": False,
-    }})
+    """, {"input": payload})
     project = data.get("projectCreate") or {}
     envs = ((project.get("environments") or {}).get("edges") or [])
     if not envs:
@@ -190,17 +209,41 @@ def deploy(token: str, project_id: str, env_id: str, service_id: str) -> dict:
     return data
 
 
-def domain(token: str, project_id: str, env_id: str, service_id: str) -> str | None:
+def ensure_domain(token: str, env_id: str, service_id: str, port: int) -> str | None:
+    """Create the public domain if the service has none, then return it.
+
+    `serviceDomainCreate` needs `targetPort`, and it must be the port the
+    container actually listens on - 12000 here, matching the PORT variable.
+    """
+    existing = domain(token, None, env_id, service_id)
+    if existing:
+        return existing
     data = gql(token, """
-        query($projectId: String!, $environmentId: String!, $serviceId: String!) {
-          serviceInstance(projectId: $projectId, environmentId: $environmentId,
-                          serviceId: $serviceId) {
-            domains { serviceDomains { domain } customDomains { domain } }
+        mutation($input: ServiceDomainCreateInput!) {
+          serviceDomainCreate(input: $input) { domain }
+        }
+    """, {"input": {"environmentId": env_id, "serviceId": service_id,
+                    "targetPort": port}})
+    return ((data.get("serviceDomainCreate") or {}).get("domain")) or None
+
+
+def domain(token: str, project_id: str, env_id: str, service_id: str) -> str | None:
+    """Return the public domain, or None while the build is still running.
+
+    `domains` is a top-level query taking all three ids; `serviceInstance` does
+    not accept projectId, which is what the first version of this function got
+    wrong.
+    """
+    data = gql(token, """
+        query($projectId: String, $environmentId: String, $serviceId: String) {
+          domains(projectId: $projectId, environmentId: $environmentId,
+                  serviceId: $serviceId) {
+            serviceDomains { domain }
+            customDomains { domain }
           }
         }
     """, {"projectId": project_id, "environmentId": env_id, "serviceId": service_id})
-    inst = data.get("serviceInstance") or {}
-    doms = inst.get("domains") or {}
+    doms = data.get("domains") or {}
     for key in ("serviceDomains", "customDomains"):
         for entry in doms.get(key) or []:
             if entry.get("domain"):
@@ -211,10 +254,16 @@ def domain(token: str, project_id: str, env_id: str, service_id: str) -> str | N
 def run(token: str, dry_run: bool) -> int:
     ctx = get_workspace(token)
     ws = ctx["workspace"]
-    print(f"[railway] signed in as {ctx['me'].get('email') or ctx['me'].get('name')}")
-    print(f"[railway] workspace: {ws['name']} ({ws['id']})")
+    ws_id = ws["id"] if ws else None
+    who = ctx["me"].get("email") or ctx["me"].get("name")
+    if who:
+        print(f"[railway] signed in as {who}")
+    if ws:
+        print(f"[railway] workspace: {ws['name']} ({ws_id})")
+    else:
+        print("[railway] workspace token accepted (no `me` on this token type)")
 
-    existing = find_project(token, ws["id"], PROJECT_NAME)
+    existing = find_project(token, ws_id, PROJECT_NAME)
     if dry_run:
         print(f"[railway] project '{PROJECT_NAME}': " +
               ("exists, would reuse" if existing else "would be created"))
@@ -232,7 +281,7 @@ def run(token: str, dry_run: bool) -> int:
         envs = ((data.get("project") or {}).get("environments") or {}).get("edges") or []
         env_id = envs[0]["node"]["id"]
     else:
-        project = create_project(token, ws["id"], PROJECT_NAME)
+        project = create_project(token, ws_id, PROJECT_NAME)
         project_id = project["id"]
         env_id = project["environmentId"]
         print(f"[railway] created project {project_id} (env {env_id})")
@@ -247,9 +296,10 @@ def run(token: str, dry_run: bool) -> int:
     deploy(token, project_id, env_id, service_id)
     print("[railway] deploy triggered (build runs the Dockerfile)")
 
-    url = domain(token, project_id, env_id, service_id)
+    url = ensure_domain(token, env_id, service_id, int(VARIABLES["PORT"]))
     if url:
         print(f"[railway] live URL: https://{url}")
+        print("[railway] the first build takes a few minutes; poll /healthz until 200")
     else:
         print("[railway] no domain yet - open the dashboard and press Generate Domain")
     print(f"[railway] dashboard: https://railway.com/project/{project_id}")
