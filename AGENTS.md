@@ -330,10 +330,30 @@ workspaceId is needed; and a fresh service has no public domain until
 `serviceDomainCreate` runs with `targetPort` matching PORT. Railway also 403s
 Python-urllib's default user agent on `__schema`, so send a browser agent.
 
-**YouTube specifically fails from Railway** - it answers "this site wants a
-signed-in session", which the app reports as a cookie hint. That is the
-datacenter IP, not the code. Set `SOCIAL_COOKIES` to a cookies.txt to get past
-it. Every other source tested works.
+**YouTube fails on any datacenter IP, and this was tested hard rather than
+assumed.** Nine player clients were tried individually (`tv`, `ios`, `android`,
+`mweb`, `web_safari`, `tv_embedded`, `web`, `android_vr`, `tv_simply`), then a
+full `bgutil` PO-token provider was built from source - node 24, `npm ci` (254
+packages), `tsc`, server on `127.0.0.1:4416`, confirmed generating real tokens
+via `/get_pot`. What happens:
+
+- `tv`, `web`, `ios`, `mweb`, `web_safari`, `tv_simply` answer "Sign in to
+  confirm you're not a bot" outright.
+- `tv_embedded` and `android` do return formats (52 and 4), and `visionos` -
+  the client yt-dlp picks by default now - returns the full ladder up to 4K.
+- But every media URL, and every HLS fragment, then answers **403**. `visionos`
+  gets as far as downloading fragments 1-123 before 403ing on the rest.
+- With the PO-token server up, extraction improves (no more sign-in error) but
+  the fragments still 403. So the PO token is not what is missing.
+
+Conclusion: YouTube is blocking this IP range at the media layer. No client
+choice, PO token, or format flag fixes that. The app's cookie hint is the
+correct answer, and `SOCIAL_COOKIES` is the real fix - a cookies.txt from a
+signed-in browser passes the bot check. Everything non-YouTube works, verified
+by an 788,493-byte download.
+
+Do not re-run this investigation: the nine-client probe and the bgutil build
+both take ~15 minutes and land on 403 every time.
 
 **Railway's build is verified, not assumed.** The Dockerfile builds, and the
 container answers 200 on `/healthz` and `/` with `PORT=8080`, binding dual-stack
