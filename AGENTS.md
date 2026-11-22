@@ -355,6 +355,15 @@ by an 788,493-byte download.
 Do not re-run this investigation: the nine-client probe and the bgutil build
 both take ~15 minutes and land on 403 every time.
 
+**Git push is blocked by the credentials in this environment.** Both
+`GITHUB_TOKEN` and `OH_GIT_CREDENTIAL_ACCESS_TOKEN_GITHUB` fail to push to
+`akhs57104-dot/All-in-one-Downloader`: the API reports
+`admin/maintain/push: true` for the repo, yet git returns 403 and the refs API
+returns "Resource not accessible by integration", so the token is effectively
+read-only for writes. Local commits are safe and the site runs from the working
+tree, but they stay local until a writable credential is supplied. Do not burn
+time retrying the push; confirm with the user first.
+
 **TeraBox is verified end to end against real public share links**, and doing
 that found a real bug. Two working MP4 shares and six ZIP shares were resolved
 from public GitHub READMEs. Findings:
