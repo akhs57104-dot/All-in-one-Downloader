@@ -298,9 +298,21 @@ and a sleeping container's 503 **only a real browser visit wakes** - uptime
 pingers and cron jobs get the 503 and do not wake it. Tokens are `sd_pat_...`
 with nested scopes `read` < `deploy` < `manage`.
 
-**Check a host's AUP before writing the deploy script.** Two of the four hosts
-examined here refuse a downloader outright, and a blocked deploy still consumes a
-quota slot. Read the terms, not the pricing page.
+**Infrlo** (`infrlo.com`) is the one no-card host whose terms clearly allow a
+downloader: section 3 bans only malware, spam, illegal content and DDoS. Free
+plan is one app, 512 MB, 0.5 vCPU, 3 GB, no card, and it builds Python from
+`requirements.txt` with no Dockerfile. **Its console API was unreachable when
+tried**: `haa.infrlo.com` (the axios baseURL in the console bundle, not
+`dash.infrlo.com`) resolves to `172.190.110.129` and times out on 80 and 443,
+and two external proxies return Cloudflare **522**, so the origin is down rather
+than the network here. `deploy_infrlo.py` mirrors the console's own calls and is
+ready for when it returns. Two details that cost time: ffmpeg is not in the base
+image, so the build command installs it; and `gunicorn` may not be on `PATH` even
+when installed, so use `python3 -m gunicorn`.
+
+**Check a host's AUP before writing the deploy script.** Three of the five hosts
+examined here refuse a downloader outright or sit in a category they ban, and a
+blocked deploy still consumes a quota slot. Read the terms, not the pricing page.
 
 **Signup cannot be automated on any of these hosts.** All of them verify an email
 address, so the account has to be created by its owner. Build the deploy script,

@@ -169,16 +169,77 @@ relay frontends", which is what a TeraBox link resolver looks like.
 an app without a downloader, and the failure is reproducible. Do not spend
 another deploy on it.
 
+### Infrlo - terms allow it, but its API is down
+
+Infrlo (`infrlo.com`) hosts Python, Node.js, Go and Rust from GitHub. Free plan:
+**one app, 512 MB, 0.5 vCPU, 3 GB disk, no card, $0/month**. No Dockerfile - it
+detects Python from `requirements.txt`, runs `pip install -r requirements.txt`,
+then your run command.
+
+**Its terms do allow this app.** Section 3 lists only malware, spam, illegal
+content and DDoS; there is no downloader clause, so unlike SnapDeploy and
+Railway it does not refuse this category. That makes it the most promising
+no-card host for a downloader.
+
+Two caveats:
+
+- **ffmpeg is not in the base image**, so the build command installs it. Without
+  it the app still runs and the "merge video and audio" option reports that
+  ffmpeg is missing.
+- **The free plan is one app**, and sign-in is Google only - no email/password
+  and no API key, so the session cookie has to come from a browser.
+
+**Blocker as of this writing: the console API does not answer.** The marketing
+site and the console SPA both serve (`infrlo.com` 200, `dash.infrlo.com/login`
+200), but the API host the bundle points at, `haa.infrlo.com`, resolves to
+`172.190.110.129` and then times out on both 80 and 443 from here. Two
+independent external proxies return Cloudflare **522** (origin unreachable),
+which rules out a local network problem - their origin is down. Their console
+already ships a "Infrlo is down for maintenance" screen, so this is a known state
+they handle.
+
+`deploy_infrlo.py` is ready and mirrors the console's own calls - read out of
+`dash.infrlo.com/assets/index-BJhXpdxx.js`:
+
+| Call | Purpose |
+| --- | --- |
+| `GET /auth/csrf-token` | `csrf_token`, echoed as `X-CSRF-Token` on writes |
+| `GET /api/me` | who the cookie belongs to |
+| `GET /api/apps` | existing apps |
+| `POST /api/apps` | `{name, source_type, repo, branch, build_cmd, run_cmd, env_vars}` |
+| `GET /api/apps/<id>/deployments` | build history and log |
+
+The API base is `https://haa.infrlo.com`, not `dash.infrlo.com` - the latter
+serves the SPA shell for `/api/*` and would look like a 200 JSON endpoint when it
+is only HTML.
+
+Run command, verified locally on port 8000 to answer 200:
+
+```bash
+python3 -m gunicorn --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:8000 wsgi:app
+```
+
+One worker with threads is not optional: the app keeps resolved HLS playlists in
+process memory, so a second worker misses tokens the first one minted. Use
+`python3 -m gunicorn`, not `gunicorn` - the console image may not put the script
+on `PATH` even when the package is installed, which is what happened here.
+
+```bash
+INFRLO_COOKIE='...' python3 deploy_infrlo.py --dry-run
+INFRLO_COOKIE='...' python3 deploy_infrlo.py
+```
+
 ### What that means for host choice
 
 | Host | Explicit downloader ban | Verdict for this app |
 | --- | --- | --- |
 | SnapDeploy | yes - `yt-dlp` named | blocked in practice |
+| Railway | yes - "copyrighted or pirated media" | risky |
+| Infrlo | no - only malware/spam/illegal/DDoS | allowed, but API is down right now |
 | Render | no - only a general IP/copyright clause | viable, but needs a card-free service created |
-| Railway | yes - "copyrighted or pirated media ... without authorization" | risky |
 | alwaysdata | no - only a general copyright clause | viable |
 
-Read the terms before deploying a downloader, not after. Two of the four hosts
+Read the terms before deploying a downloader, not after. Two of the five hosts
 refuse this category outright, and a blocked deploy still burns a slot.
 
 ### alwaysdata - free forever, no card, no documented spin-down
