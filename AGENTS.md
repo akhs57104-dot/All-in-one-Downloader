@@ -193,8 +193,12 @@ Other traps:
   Free plan is the one that needs no payment details at all. Render's Free plan grants 750 instance hours a month, and
   the longest month is 744 hours, so one always-on service fits - but it spins
   down after 15 minutes idle, so pair it with a free UptimeRobot check on
-  `/healthz` every 5 minutes. Fly.io and Railway are *not* free any more:
-  Fly gives $1 of credit for 7 days, Railway needs a card. Hugging Face moved
+    `/healthz` every 5 minutes. Fly.io is *not* free any more: it gives $1 of
+    credit for 7 days. **Railway is free without a card** as of this writing -
+    `railway.com/pricing` lists a Free plan at $0/month, "No credit card
+    required", $1 of monthly usage credits, services that wake on request, and
+    1 vCPU / 0.5 GB RAM - so an earlier note in this file that Railway needs a
+    card was wrong. Hugging Face moved
   Docker Spaces behind a paid plan (only Static Spaces stayed free), and Koyeb's
   free tier is only 5 hours a month - both are traps, do not recommend them.
 - **Vercel and Netlify cannot host this app.** Vercel Functions cap at 300 s on
@@ -280,9 +284,9 @@ Acceptable Use Policy.
 
 The account stayed healthy (4 of 5 rolling deploys left, no orphan container) but
 no container was ever created. This is not fixable in code, so do not spend
-another deploy on it. `Railway` bans "copyrighted or pirated media ... without
-authorization" too. **Render and alwaysdata have only general copyright clauses**
-and are the two hosts that will actually take a downloader.
+another deploy on it. Railway has only a general copyright clause, not a
+downloader ban, so it is the strongest candidate - see deploy_railway.py.
+**Render and alwaysdata also have only general copyright clauses**
 
 Their API is undocumented in prose; the paths, the `X-API-Key` header and the
 payloads live in `deploy_snapdeploy.py` and were read out of the official MCP
@@ -309,6 +313,22 @@ than the network here. `deploy_infrlo.py` mirrors the console's own calls and is
 ready for when it returns. Two details that cost time: ffmpeg is not in the base
 image, so the build command installs it; and `gunicorn` may not be on `PATH` even
 when installed, so use `python3 -m gunicorn`.
+
+**Railway's build is verified, not assumed.** The Dockerfile builds, and the
+container answers 200 on `/healthz` and `/` with `PORT=8080`, binding dual-stack
+(`[start.sh] gunicorn on [::]:8080`). Inside it: ffmpeg 7.1.5,
+`/api/social/platforms` reports 156 platforms with `"ffmpeg": true`, a real
+YouTube link resolves to a title plus 15 formats, and an end-to-end download
+returns 788,493 bytes of `video/mp4` with HTTP 200. `deploy_railway.py` drives
+the GraphQL API at `backboard.railway.com/graphql/v2`; every call in it was
+introspected from the live schema, and an invalid token returns Railway's own
+"Not Authorized", which proves the request shape is right.
+
+**YouTube will fail on any datacenter IP, and that is not a bug here.** From
+this network `yt-dlp` returns the metadata and lists 15 formats, but the HLS
+fragments come back empty and no progressive format is offered. Railway, Fly and
+Render all run on datacenter IPs, so expect the same there. TeraBox and plain
+HTTP sources work. YouTube needs cookies or a proxy, which is a separate job.
 
 **Check a host's AUP before writing the deploy script.** Three of the five hosts
 examined here refuse a downloader outright or sit in a category they ban, and a

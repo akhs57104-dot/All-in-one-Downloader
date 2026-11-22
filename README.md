@@ -229,18 +229,86 @@ INFRLO_COOKIE='...' python3 deploy_infrlo.py --dry-run
 INFRLO_COOKIE='...' python3 deploy_infrlo.py
 ```
 
+### Railway - no card, no downloader ban, and the build is verified
+
+Railway is the best fit found so far. **Its terms do not name downloaders.**
+The Acceptable Use Policy bans hosting or distributing "copyrighted or pirated
+software, media, or other materials without proper authorization from the rights
+holder" - a copyright clause shared by every host, not the category ban that
+SnapDeploy writes (`yt-dlp` is named in its section 3). That distinction is why
+Railway is worth trying and SnapDeploy was not.
+
+Pricing, from `railway.com/pricing`: the Free plan is **$0/month, no credit card
+required**, with $1 of monthly usage credits, services that wake on request, and
+up to **1 vCPU / 0.5 GB RAM / 0.5 GB volume**. The first 30 days are a trial with
+$5 of credits. Note the RAM: 512 MB is the real constraint for yt-dlp, and the
+Dockerfile installs ffmpeg inside that budget.
+
+**The build was verified locally, not assumed.** `docker build` succeeded and the
+container answered 200 on `/healthz` and `/` with `PORT=8080`, bound dual-stack:
+
+```
+[start.sh] gunicorn on [::]:8080 (control socket disabled)
+```
+
+Inside that container: `ffmpeg 7.1.5`, `/api/social/platforms` returned **156
+platforms** with `"ffmpeg": true`, a real YouTube link resolved to its title and
+15 formats, and an end-to-end download returned **788,493 bytes of
+`video/mp4` with HTTP 200**.
+
+Two traps this repo already handles, both in `start.sh`:
+
+- Railway's dashboard can pass the literal text `$PORT`, and gunicorn then exits
+  with `'$PORT' is not a valid port number`. Any non-numeric PORT is treated as
+  absent and falls back to 12000.
+- Railway health-checks over an IPv6 private network, so binding `0.0.0.0` gets
+  "connection refused" and a healthy deploy is marked failed. `start.sh` binds
+  dual-stack when the kernel allows it.
+
+`deploy_railway.py` drives Railway's public GraphQL API. Every call in it was
+introspected from the live schema at `https://backboard.railway.com/graphql/v2`,
+not guessed:
+
+| Call | Purpose |
+| --- | --- |
+| `query me` | account and workspace id |
+| `query projects(workspaceId:)` | reuse the project if it already exists |
+| `mutation projectCreate` | project plus its default environment |
+| `mutation serviceCreate` | service bound to `repo` + `branch` |
+| `mutation variableCollectionUpsert` | `PORT`, `TERABOX_FALLBACK`, ... |
+| `mutation serviceInstanceDeployV2` | build and start |
+| `query serviceInstance` | the generated domain |
+
+```bash
+RAILWAY_TOKEN=... python3 deploy_railway.py --dry-run
+RAILWAY_TOKEN=... python3 deploy_railway.py
+```
+
+Create the token at <https://railway.com/account/tokens>. An account token is
+required - a project token cannot create a project. Verified that the script
+reaches the API: an invalid token returns Railway's own `Not Authorized`, and
+with no token it stops before any request.
+
+**One expectation to set.** YouTube blocks datacenter IPs. From this network,
+`yt-dlp` resolved the metadata and listed 15 formats, but the HLS fragments came
+back empty and the progressive formats were not offered, so YouTube downloads
+failed while every other path worked. Railway runs on datacenter IPs too, so
+expect the same for YouTube specifically; TeraBox and the sites that serve plain
+HTTP work. Fixing YouTube needs cookies or a proxy, which is a separate job.
+
 ### What that means for host choice
 
 | Host | Explicit downloader ban | Verdict for this app |
 | --- | --- | --- |
 | SnapDeploy | yes - `yt-dlp` named | blocked in practice |
-| Railway | yes - "copyrighted or pirated media" | risky |
+| Railway | no - a general copyright clause only | **best fit; build verified, needs a token** |
 | Infrlo | no - only malware/spam/illegal/DDoS | allowed, but API is down right now |
 | Render | no - only a general IP/copyright clause | viable, but needs a card-free service created |
 | alwaysdata | no - only a general copyright clause | viable |
 
-Read the terms before deploying a downloader, not after. Two of the five hosts
-refuse this category outright, and a blocked deploy still burns a slot.
+Read the terms before deploying a downloader, not after. One of the five hosts
+names `yt-dlp` and refuses this category outright, and a blocked deploy still
+burns a quota slot.
 
 ### alwaysdata - free forever, no card, no documented spin-down
 
