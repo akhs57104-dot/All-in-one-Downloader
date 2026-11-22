@@ -265,6 +265,29 @@ report a commit as deployed when it only exists locally.
 the only step that cannot be scripted, because the verification mail goes to the
 account owner.
 
+**SnapDeploy** (`snapdeploy.dev`, a product of AAR Labs) is the best free-tier
+fit found: Docker on AWS, free Small container 512 MB / 0.25 vCPU, no card, 4
+containers, 10 deploys a day (5 per rolling 12h), 100 container-hours a month. It
+builds the bundled `Dockerfile`, so `ffmpeg` comes for free and the app's ~75 MB
+idles well inside 512 MB. Its API is undocumented in prose; the paths, the
+`X-API-Key` header and the payloads live in `deploy_snapdeploy.py` and were read
+out of the official MCP client (`@snapdeploy/mcp`, `dist/tools.js`):
+
+- `GET /api/mobile/bootstrap` - plan, containers, quota, deploy cap
+- `POST /api/mobile/deploy` - `{repo, name, branch, env, port, size}`
+- `GET /api/mobile/containers/<id>` and `/deployments?limit=N`
+
+Two traps: Cloudflare fronts the domain and answers **403 error 1010** to
+`Python-urllib/x.y`, so scripts must set their own `User-Agent`; and a sleeping
+container answers 503 that **only a real browser visit wakes** - uptime pingers
+and cron jobs get the 503 and do not wake it, so the Render pinger trick does not
+transfer. Tokens are `sd_pat_...` with nested scopes `read` < `deploy` < `manage`.
+
+**Signup cannot be automated on any of these hosts.** All three verify an email
+address, so the account has to be created by its owner. Build the deploy script,
+verify its request shape against the API's own schema, and hand over the one
+command - do not claim a deploy happened when only the script exists.
+
 ## Conventions
 
 - Keep it a single file; no build step.
