@@ -1,0 +1,10 @@
+{
+  "_comment": "The one switch that moves every installed app to a new backend. Change backend_url here, commit, push - no APK rebuild, no reinstall. The app reads this file from GitHub raw on every launch.",
+  "backend_url": "https://web-production-ac65b984.up.railway.app",
+  "fallback_urls": [],
+  "min_app_version_code": 1,
+  "latest_app_version_code": 1,
+  "latest_app_version_name": "1.0.0",
+  "update_url": "",
+  "message": ""
+}

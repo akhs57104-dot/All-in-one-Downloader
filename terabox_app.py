@@ -598,6 +598,85 @@ def healthz():
     return jsonify({"ok": True})
 
 
+PRIVACY_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy Policy - Tech Arslan Software Solutions</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+max-width:720px;margin:0 auto;padding:28px 20px;line-height:1.65;color:#1f2430}
+h1{font-size:26px;margin-bottom:4px}h2{font-size:18px;margin-top:28px}
+.updated{color:#6b7280;font-size:14px}code{background:#f3f4f6;padding:1px 5px;border-radius:4px}</style>
+</head><body>
+<h1>Privacy Policy</h1>
+<p class="updated">Tech Arslan Software Solutions &middot; last updated 17 November 2026</p>
+
+<h2>What this app does</h2>
+<p>Tech Arslan is a downloader. You paste or share a public link, the app asks our
+server to resolve it, and the file is downloaded to your device's Downloads folder
+by Android's own download manager.</p>
+
+<h2>What we do not collect</h2>
+<p>We do not create accounts, and we do not ask for your name, email, phone number
+or contacts. We do not read your files, your photos or your SMS. The app requests
+only two Android permissions: internet access, and the ability to check whether a
+network connection exists.</p>
+
+<h2>What is processed</h2>
+<p>The link you submit is sent to our server so it can be resolved, and is held in
+memory only for the length of that request. We do not keep a history of your links
+on the server. A copy of your recent links may be stored <em>on your own device</em>
+so the app can show them to you; clearing the app's data removes them.</p>
+<p>Like any web service, our host records standard request logs (IP address, time,
+requested path) for security and troubleshooting. These are retained by the hosting
+provider on a short rolling basis.</p>
+
+<h2>Third parties</h2>
+<p>Resolving a link necessarily contacts the service that hosts the file (for
+example TeraBox, or the social platform you pasted a link from). Those services
+receive the request as they would if you opened the link in a browser, and their
+own privacy policies apply. We do not sell data, and we do not share data with
+advertisers.</p>
+
+<h2>Children</h2>
+<p>The app is not directed at children under 13 and we do not knowingly process
+their data.</p>
+
+<h2>Your control</h2>
+<p>Uninstalling the app removes everything it stored locally. Because we hold no
+account data, there is nothing further for us to delete on your behalf.</p>
+
+<h2>Contact</h2>
+<p>Questions about this policy: <a href="mailto:support@techarslan.example">
+support@techarslan.example</a></p>
+</body></html>
+"""
+
+
+@app.route("/privacy")
+def privacy():
+    """Public privacy policy. Play Console requires a reachable URL."""
+    return Response(PRIVACY_HTML, mimetype="text/html")
+
+
+@app.route("/api/app-config")
+def app_config():
+    """Serve the backend-switch file, so an installed app has a second source.
+
+    The Android client prefers this route over GitHub raw because it is on the
+    same host the app is already talking to, and because GitHub raw can be
+    rate-limited or blocked on some networks. Serving the file from here also
+    means the switch works even if the repository is made private later.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "api_config.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as exc:
+        return jsonify({"ok": False, "error": f"Config unavailable: {exc}"}), 500
+    return jsonify({"ok": True, "config": data}), 200
+
+
 @app.route("/api/resolve", methods=["POST"])
 def api_resolve():
     link = _request_link()

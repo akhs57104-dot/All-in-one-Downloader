@@ -355,6 +355,29 @@ by an 788,493-byte download.
 Do not re-run this investigation: the nine-client probe and the bgutil build
 both take ~15 minutes and land on 403 every time.
 
+**The Android shell is in `android/` and builds with JDK 21 + AGP 8.7.3 +
+Gradle 8.9 (wrapper committed).** `assembleDebug` and `assembleRelease` both
+verified here; `apksigner verify` passes v1+v2 and `zipalign -c 4` passes. The
+toolchain is not preinstalled: JDK 21 is `openjdk-21-jdk-headless` (Debian 13 has
+no JDK 17 package), the SDK is at `~/android-sdk` with `platforms;android-35` and
+`build-tools;35.0.0`, and Gradle 8.9 is unpacked at `~/tools/gradle-8.9`. The
+project also needs `pluginManagement { repositories { google() } }` in
+`settings.gradle` or AGP cannot resolve. Keystore lives at
+`/workspace/keystore/techarslan-release.jks`, outside the repo, with a placeholder
+passphrase that must be rotated before a real Play upload.
+
+**Backend switching without an APK rebuild is `api_config.json` + `/api/app-config`.**
+The client tries GitHub raw first, then the last-known backend's own
+`/api/app-config`, then the `BAKED_BACKEND` constant. A candidate is accepted only
+if `/healthz` answers 200. Verified locally that the chain resolves and that a
+non-http value is rejected (`isHttpUrl`, because `startsWith("http")` would accept
+`httpfoo:`). Note the migration trap: renaming the repo breaks the raw URL inside
+already-installed APKs, so repo and backend must not move simultaneously.
+
+**`/privacy` is served by the Flask app** for the Play Console privacy policy URL.
+It states the app collects nothing, which matches the actual permission list
+(INTERNET + ACCESS_NETWORK_STATE only).
+
 **Git push is blocked by the credentials in this environment.** Both
 `GITHUB_TOKEN` and `OH_GIT_CREDENTIAL_ACCESS_TOKEN_GITHUB` fail to push to
 `akhs57104-dot/All-in-one-Downloader`: the API reports

@@ -1,0 +1,49 @@
+plugins {
+    id 'com.android.application'
+}
+
+def versionCodeValue = (project.findProperty('appVersionCode') ?: '1').toInteger()
+def versionNameValue = project.findProperty('appVersionName') ?: '1.0.0'
+
+android {
+    namespace 'com.techarslan.software'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.techarslan.software"
+        minSdk 23
+        targetSdk 35
+        versionCode versionCodeValue
+        versionName versionNameValue
+        resValue "string", "app_version_name", versionNameValue
+    }
+
+    signingConfigs {
+        release {
+            // CI writes these four values from repository secrets. Without them the
+            // release build falls back to unsigned, which Play will reject, so the
+            // build is still useful locally but clearly not shippable.
+            def storePath = System.getenv("KEYSTORE_PATH")
+            if (storePath) {
+                storeFile file(storePath)
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (System.getenv("KEYSTORE_PATH")) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
