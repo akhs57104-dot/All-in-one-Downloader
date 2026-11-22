@@ -42,21 +42,26 @@ Fly.io, Heroku and similar.
 
 Free hosting splits into two groups: hosts that want a card on file even on the
 free plan (Northflank, Koyeb), and hosts that do not (Render, SnapDeploy,
-alwaysdata). The Docker hosts build the bundled `Dockerfile`, so `ffmpeg` comes
-along.
+alwaysdata). But for *this* app the deciding factor is not price - it is whether
+the host's terms allow a downloader at all.
 
-**If you have no card, there are three options**, and they fail in different
-ways:
+**Read the terms first.** SnapDeploy names `yt-dlp` as blocked and refused the
+deploy outright; Railway bans "copyrighted or pirated media ... without
+authorization". Render and alwaysdata have only general copyright clauses, so
+they are the two that will actually host this:
 
 | Host | Good | Bad |
 | --- | --- | --- |
-| SnapDeploy | Docker + `ffmpeg`, 512 MB, deploys from the repo | sleeps after 15 min, 100 hours/month |
-| Render | Docker + `ffmpeg`, 512 MB, easy dashboard | sleeps after 15 min, dashboard sometimes will not create the service |
+| Render | Docker + `ffmpeg`, 512 MB, easy dashboard | sleeps after 15 min; the service still has to be created |
 | alwaysdata | no sleep, 0 €/month for life | no Docker (install `ffmpeg` by hand), 256 MB |
 
-SnapDeploy and Render sleep but a browser visit wakes them, so an uptime pinger
-helps there. alwaysdata does not sleep, but its `max_idle_time` stops an idle
-application unless it is raised - `deploy_alwaysdata.py` raises it to 6 hours.
+SnapDeploy would have been the best technical fit - Docker, `ffmpeg`, 512 MB, no
+card - and its deploy API works, but its Acceptable Use Policy blocks the app.
+See the SnapDeploy section below for the exact clause and the API error.
+
+Render sleeps but a browser visit wakes it, so an uptime pinger helps there.
+alwaysdata does not sleep, but its `max_idle_time` stops an idle application
+unless it is raised - `deploy_alwaysdata.py` raises it to 6 hours.
 
 ### Northflank - free plan, but a card is required
 
@@ -133,50 +138,48 @@ sudo docker run -d --name t1 -e PORT=10000 -p 10000:10000 techarslan
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:10000/healthz   # 200
 ```
 
-### SnapDeploy - Docker host, free tier, no card
+### SnapDeploy - blocked by its terms, do not retry
 
-SnapDeploy runs Docker on AWS and its free tier is a Small container: **512 MB
-RAM, 0.25 vCPU, no credit card**, 4 containers, 10 deploys a day (5 per rolling
-12 hours) and 100 container-hours a month. It builds the bundled `Dockerfile`,
-so `ffmpeg` comes along and the app fits with room to spare - it idles at about
-75 MB.
+SnapDeploy's free tier is the best technical fit on paper: a Small container
+(512 MB, 0.25 vCPU), no card, Docker, so the bundled `Dockerfile` and its
+`ffmpeg` come along, and the app's ~75 MB idles well inside 512 MB.
 
-Sign up at <https://snapdeploy.dev/register> (GitHub one-tap or email; the page
-states "Free on a Small container, no card needed"), then create a token with
-the `deploy` scope at <https://snapdeploy.dev/api-keys>.
+**It will not host this app.** Their Terms of Service name `yt-dlp` explicitly:
 
-```bash
-SNAPDEPLOY_API_KEY=sd_pat_... python3 deploy_snapdeploy.py --dry-run
-SNAPDEPLOY_API_KEY=sd_pat_... python3 deploy_snapdeploy.py
+> 3. Video Piracy & Copyright Infringement Tools
+> Deploying applications that download, rip, transcode, or redistribute
+> copyrighted video/audio content without authorization:
+> Video downloaders: `yt-dlp`, `youtube-dl`, `youtube_dl`, `pytube`, `you-get`, ...
+
+A deploy was accepted and then failed with:
+
+```
+status: FAILED
+errorMessage: Your deployment was blocked because it violates SnapDeploy's
+Acceptable Use Policy.
 ```
 
-The container name becomes the URL:
-`https://tech-arslan-software-solutions.containers.snapdeploy.app`.
+The account itself stayed healthy - 4 of 5 rolling deploys remained and no
+container was left behind - but the container was never created. `yt-dlp` is in
+the requirements and the app is a downloader, so this is a policy decision, not
+something a code change can work around. Their list also blocks "cloud-storage
+relay frontends", which is what a TeraBox link resolver looks like.
 
-The API has no prose documentation, so the paths, the `X-API-Key` header and the
-payloads in `deploy_snapdeploy.py` were read out of the official MCP client
-(`@snapdeploy/mcp`, `dist/tools.js`) instead of guessed:
+`deploy_snapdeploy.py` is kept for two reasons: the API plumbing is reusable for
+an app without a downloader, and the failure is reproducible. Do not spend
+another deploy on it.
 
-| Call | Purpose |
-| --- | --- |
-| `GET /api/mobile/bootstrap` | plan, containers, quota, deploy cap |
-| `GET /api/mobile/deploy-cap` | deploys left in the rolling window |
-| `POST /api/mobile/deploy` | `{repo, name, branch, env, port, size}` |
-| `GET /api/mobile/containers/<id>` | status, URL, port |
-| `GET /api/mobile/deployments/<id>` | build log tail, error message |
+### What that means for host choice
 
-Two things to know:
+| Host | Explicit downloader ban | Verdict for this app |
+| --- | --- | --- |
+| SnapDeploy | yes - `yt-dlp` named | blocked in practice |
+| Render | no - only a general IP/copyright clause | viable, but needs a card-free service created |
+| Railway | yes - "copyrighted or pirated media ... without authorization" | risky |
+| alwaysdata | no - only a general copyright clause | viable |
 
-- **Free containers sleep after ~15 minutes of no traffic** and wake in about a
-  minute. A sleeping container answers `503` and only a real browser visit
-  triggers the wake - uptime pingers and cron jobs get the `503` and do not wake
-  it. So the Render-style pinger trick does not work here.
-- **Cloudflare fronts the domain** and answers `403` (error 1010) to
-  `Python-urllib/x.y`, so any script calling this API must set its own
-  `User-Agent`.
-
-The 100 monthly container-hours are a real limit: an app awake 8 hours a day
-would use ~240 hours and run out mid-month. A few visits a day uses roughly 30.
+Read the terms before deploying a downloader, not after. Two of the four hosts
+refuse this category outright, and a blocked deploy still burns a slot.
 
 ### alwaysdata - free forever, no card, no documented spin-down
 

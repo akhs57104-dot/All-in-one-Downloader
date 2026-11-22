@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """Deploy this app to SnapDeploy through its mobile API.
 
+WARNING: SnapDeploy's Terms of Service name `yt-dlp` explicitly, under
+"3. Video Piracy & Copyright Infringement Tools", as a blocked video downloader.
+A deploy of this app was accepted and then failed with "Your deployment was
+blocked because it violates SnapDeploy's Acceptable Use Policy." The script is
+kept so the finding is reproducible and so the API plumbing is reusable for an
+app that does not bundle a downloader - but it will not get this app live.
+
 SnapDeploy's free tier is a Small container (512 MB, 0.25 vCPU), no card, and it
 builds the bundled Dockerfile, so `ffmpeg` comes along. The app idles at ~75 MB,
 well inside 512 MB.
