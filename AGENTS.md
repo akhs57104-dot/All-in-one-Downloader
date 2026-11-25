@@ -494,6 +494,19 @@ already-installed APKs, so repo and backend must not move simultaneously.
 It states the app collects nothing, which matches the actual permission list
 (INTERNET + ACCESS_NETWORK_STATE only).
 
+- **This machine cannot push to GitHub.** Measured again on 2026-11-17:
+  `GITHUB_TOKEN` is a GitHub App installation token (`ghu_` prefix), the API
+  reports `permissions.push: true`, `x-oauth-scopes` is empty, ref reads return
+  200, but blob creation returns `403 Resource not accessible by integration` and
+  `git push` returns `Permission to ... denied`. `OH_GIT_CREDENTIAL_ACCESS_TOKEN_GITHUB`
+  is not a git credential either (`Invalid username or token`). `gh auth status`
+  authenticates with the same token, so the `gh` CLI cannot push either.
+  The working answer is to hand the user patches: `git format-patch origin/main..HEAD`
+  into `/workspace/push-artifacts/`, plus a bundle. Verify the series first by
+  `git am` on a fresh clone of `origin/main` and comparing `HEAD^{tree}` to the
+  local tree - a matching hash proves the patches carry exactly what was tested.
+- Local branch is `master`, remote is `main`, and `origin/main` stays an ancestor,
+  so the history fast-forwards. Use `git push origin HEAD:main`, not `HEAD`.
 **`GITHUB_TOKEN` here is a GitHub App installation token and cannot push.**
 `x-oauth-scopes` comes back empty, the API still reports `push: true`, and git
 answers 403 "Resource not accessible by integration". A user-supplied fine-grained
