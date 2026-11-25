@@ -4709,7 +4709,10 @@ plDownload.addEventListener('click', async () => {
     batches.push(picked.slice(i, i + PLAYLIST_BATCH_LIMIT));
   }
   plDownload.disabled = true;
-  let ok = 0, bad = 0, firstError = '';
+  // Two kinds of failure, and they need different words: an item that failed
+  // inside a delivered ZIP is written into _failed_items.txt, while a batch that
+  // never produced a ZIP has no file to point the user at.
+  let ok = 0, inZip = 0, lost = 0, firstError = '';
   try {
     for (let b = 0; b < batches.length; b++) {
       const chunk = batches[b];
@@ -4728,7 +4731,7 @@ plDownload.addEventListener('click', async () => {
         try { const d = await resp.json(); why = d.error || why; } catch (e) { /* body was not JSON */ }
         // Kept rather than shown now: the next batch would overwrite the status.
         if (!firstError) firstError = why;
-        bad += chunk.length;
+        lost += chunk.length;
         continue;
       }
       const blob = await resp.blob();
@@ -4745,17 +4748,24 @@ plDownload.addEventListener('click', async () => {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(href), 120000);
       ok += savedN;
-      bad += failedN;
+      inZip += failedN;
       // Browsers only honour one automatic download per gesture unless they are
       // asked; a short gap between parts keeps the rest from being dropped.
       if (b < batches.length - 1) await new Promise(r => setTimeout(r, 1200));
     }
     if (!ok) {
-      sSetStatus('No files could be downloaded: ' + bad + ' item'
-        + (bad === 1 ? '' : 's') + ' failed. ' + (firstError || ''), true);
+      sSetStatus('No files could be downloaded: ' + (inZip + lost) + ' item'
+        + (inZip + lost === 1 ? '' : 's') + ' failed. ' + firstError, true);
     } else {
+      const reasons = [];
+      if (inZip) reasons.push(inZip + ' failed (each listed in _failed_items.txt inside its ZIP)');
+      if (lost) reasons.push(lost + ' item' + (lost === 1 ? '' : 's') + ' could not be fetched: '
+        + (firstError || 'no ZIP was produced'));
+      // Server messages end in a full stop of their own; joining them as-is would
+      // print "40.." at the end of the line.
+      const tail = reasons.length ? '. ' + reasons.join('; ') : '';
       sSetStatus('Done: ' + ok + ' file' + (ok === 1 ? '' : 's') + ' downloaded'
-        + (bad ? ', ' + bad + ' failed (listed in _failed_items.txt inside the ZIP)' : '') + '.');
+        + (tail ? tail.replace(/[.\\s]+$/, '') : '') + '.');
       addHistory({ kind: 'downloaded', name: playlistState.title + ' (' + ok + ' items)',
         id: 'zip', link: playlistState.url, is_video: false, source: 'social', tag: 'ZIP' });
     }
