@@ -582,6 +582,42 @@ Session-bound sites (TikTok signs its media URLs against the extractor's own
 cookies) work because the cookies yt-dlp collected are threaded from extraction
 through to the stream and download requests.
 
+
+### When one source fails, the next one is tried
+
+Sites break in different ways, so the resolver walks a chain of sources rather
+than trusting a single extractor. Each entry is a different kind of source, not
+a repeat of the same call:
+
+| Order | Source | Covers |
+| --- | --- | --- |
+| 1 | primary extractor | the normal path |
+| 2 | plain HTTP client | sites that reject curl_cffi's TLS fingerprint |
+| 3 | alternate player clients | player clients whose response still carries media |
+| 4 | generic extractor | pages whose dedicated extractor has rotted |
+| 5 | page HTML | media embedded in the page that no extractor reports |
+
+A failure moves straight to the next entry, so a single bad guess no longer ends
+the download. When the chain has to shift, the result card shows a "Backup
+source" badge naming the source that answered, and hovering it lists what each
+earlier source said. The download step fails over the same way: if a resolved
+CDN link has gone stale (a `403` on a signed URL is routine), the file is fetched
+again through the extractor instead of failing.
+
+### Playlists
+
+Paste a playlist link and the app switches from a single video to a list:
+YouTube (`?list=`), SoundCloud sets, Vimeo albums/channels/showcases, and
+Dailymotion playlists. It reads the list flat, so even a 180-item playlist comes
+back in seconds. Tick the items you want and press **Download selected as ZIP**;
+the server fetches each one, names them `001 - Title.ext`, and streams back a
+single zip.
+
+A zip is only sent once every file inside it exists, so one request holds at most
+15 items (`PLAYLIST_BATCH_LIMIT`) - send another batch for the rest. Any item that
+could not be fetched is listed in `_failed_items.txt` inside the zip rather than
+failing the whole download.
+
 Some sites — Instagram, Facebook, and private or age-gated videos — refuse
 anonymous requests. Export a Netscape-format `cookies.txt` from a signed-in
 browser and pass it in via `SOCIAL_COOKIES` (see below).

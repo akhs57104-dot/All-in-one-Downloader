@@ -48,6 +48,7 @@ import tempfile
 import threading
 import time
 import urllib.parse
+import zipfile
 
 from flask import Flask, Response, jsonify, request, send_file
 from markupsafe import escape
@@ -1571,7 +1572,7 @@ def _impersonate_target():
     return None
 
 
-def _base_ydl_opts(*, quiet: bool = True) -> dict:
+def _base_ydl_opts(*, quiet: bool = True, impersonate: bool = True) -> dict:
     opts = {
         "quiet": quiet,
         "no_warnings": quiet,
@@ -1583,9 +1584,10 @@ def _base_ydl_opts(*, quiet: bool = True) -> dict:
         "retries": 2,
         "http_headers": {"User-Agent": BROWSER_UA},
     }
-    target = _impersonate_target()
-    if target is not None:
-        opts["impersonate"] = target
+    if impersonate:
+        target = _impersonate_target()
+        if target is not None:
+            opts["impersonate"] = target
     return opts
 
 
@@ -1620,63 +1622,90 @@ def _run_extract(url: str, opts: dict):
     return info, cookies
 
 
+# Sites fail for different reasons, and the reasons point at different fixes: a
+# bot check wants a real browser fingerprint, a stale player client wants a
+# different one, and a broken extractor wants the generic one. Trying them in
+# order means a single bad guess no longer ends the download.
+_EXTRACT_STRATEGIES = ("default", "no-impersonate", "alt-clients", "generic")
+
+
+def _strategy_opts(strategy: str) -> dict:
+    """yt-dlp options for one extraction strategy."""
+    if strategy == "no-impersonate":
+        # A few sites reject curl_cffi's TLS fingerprint outright; the plain
+        # urllib handler is the fallback that works there.
+        return _base_ydl_opts(impersonate=False)
+    if strategy == "alt-clients":
+        # YouTube rotates what each player client is allowed to see. The default
+        # set can come back empty while these still answer.
+        opts = _base_ydl_opts()
+        opts["extractor_args"] = {
+            "youtube": {"player_client": ["android_vr", "ios", "tv", "web_safari"]}
+        }
+        return opts
+    if strategy == "generic":
+        return dict(_base_ydl_opts(), force_generic_extractor=True)
+    return _base_ydl_opts()
+
+
 def _extract_info(url: str) -> tuple:
-    """Run yt-dlp on a URL. Returns `(info, cookies)`.
+    """Resolve a URL, walking a chain of strategies until one works.
 
-    Some sites (TikTok) sign the media URL against the session cookies that
-    yt-dlp collected while extracting, so the cookies must travel with the URL
-    when it is fetched later.
+    Returns `(info, cookies)` with `info["_source"]` naming the strategy that
+    succeeded and `info["_attempts"]` listing what was tried, so the UI can say
+    which source answered instead of silently pretending nothing went wrong.
     """
-    opts = _base_ydl_opts()
     cookie = _cookie_file()
-    if cookie:
-        opts["cookiefile"] = cookie
-    # Extraction occasionally fails transiently (an empty format list from a CDN
-    # hiccup), so one quick retry turns a user-visible error into a success.
+    attempts = []
     last_exc = None
-    for attempt in range(2):
+    last_cookies = {}
+
+    for strategy in _EXTRACT_STRATEGIES:
+        # Building the options is itself fallible (probing curl_cffi, an unknown
+        # extractor arg), so it happens inside the guarded block: a strategy that
+        # cannot even be configured must not end the chain.
         try:
-            info, cookies = _run_extract(url, opts)
-            break
-        except Exception as exc:  # noqa: BLE001 - message is shown to the user
+            opts = _strategy_opts(strategy)
+            if cookie:
+                opts["cookiefile"] = cookie
+        except Exception as exc:  # noqa: BLE001
             last_exc = exc
-            if attempt == 0 and _is_transient(exc):
-                time.sleep(1.5)
-                continue
-            break
-    else:  # pragma: no cover - the loop always breaks
-        raise SocialError("That link could not be read; please try again.")
-
-    if last_exc is not None:
-        # No dedicated extractor matched. The generic extractor still finds
-        # media embedded in the page (og:video, <video src>, players), which is
-        # what makes Threads/LinkedIn-style links work at all.
-        if "unsupported url" in str(last_exc).lower():
-            generic = dict(opts, force_generic_extractor=True)
+            attempts.append((strategy, str(exc)[:160]))
+            continue
+        # One extra pass per strategy: extraction hiccups (an empty format list
+        # from a CDN blip) look identical to a real refusal on the first try.
+        for attempt in range(2):
             try:
-                info, cookies = _run_extract(url, generic)
-                last_exc = None
-            except Exception:  # noqa: BLE001 - fall through to the friendly error
-                pass
-        if last_exc is not None:
-            # The extractor gave up, but the page may still carry the media in
-            # its HTML (Pinterest's videoUrls). Scrape before reporting failure.
-            scraped = _html_media_fallback(url)
-            if scraped is not None:
-                return scraped, {}
-            raise SocialError(
-                _with_platform_hint(url, _friendly_download_error(last_exc))
-            ) from last_exc
+                info, cookies = _run_extract(url, opts)
+            except Exception as exc:  # noqa: BLE001 - reported to the user
+                last_exc = exc
+                attempts.append((strategy, str(exc)[:160]))
+                if attempt == 0 and _is_transient(exc):
+                    time.sleep(1.2)
+                    continue
+                break
+            if isinstance(info, dict):
+                info["_source"] = strategy
+                info["_attempts"] = attempts
+                return info, cookies
+            last_exc = SocialError("That link has no playable media.")
+            attempts.append((strategy, "no playable media"))
+            break
 
-    if not isinstance(info, dict):
-        # Telegram (and a few others) can return None instead of raising.
-        raise SocialError("That link has no playable media.")
-    if info.get("_type") == "playlist":
-        entries = [e for e in (info.get("entries") or []) if e]
-        if not entries:
-            raise SocialError("That link has no playable media.")
-        info = entries[0]
-    return info, cookies
+    # Every extractor gave up, but the page may still carry the media in its own
+    # HTML (Pinterest's videoUrls, a bare <video src>). Scrape before failing.
+    scraped = _html_media_fallback(url)
+    if scraped is not None:
+        scraped["_source"] = "html-scrape"
+        scraped["_attempts"] = attempts
+        return scraped, last_cookies
+
+    attempts.append(("html-scrape", "no media found in the page"))
+    message = _with_platform_hint(url, _friendly_download_error(last_exc)
+                                  if last_exc else "That link could not be read.")
+    err = SocialError(message)
+    err.attempts = attempts
+    raise err from last_exc
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -1969,6 +1998,8 @@ def social_extract(url: str) -> dict:
     return {
         "url": url,
         "platform": detect_platform(url),
+        "source": info.get("_source") or "default",
+        "attempts": _attempts_public(info.get("_attempts")),
         "title": info.get("title") or "Untitled",
         "uploader": info.get("uploader") or info.get("channel") or info.get("uploader_id") or "",
         "duration": info.get("duration"),
@@ -1983,6 +2014,27 @@ def social_extract(url: str) -> dict:
         "best_audio": best_audio["format_id"] if best_audio else None,
         "ffmpeg": _ffmpeg_available(),
     }
+
+
+_SOURCE_LABELS = {
+    "default": "primary extractor",
+    "no-impersonate": "plain HTTP client",
+    "alt-clients": "alternate player clients",
+    "generic": "generic extractor",
+    "html-scrape": "page HTML",
+}
+
+
+def _attempts_public(attempts) -> list:
+    """Turn the internal attempt log into what the UI shows."""
+    out = []
+    for strategy, reason in (attempts or []):
+        out.append({
+            "source": strategy,
+            "label": _SOURCE_LABELS.get(strategy, strategy),
+            "reason": reason,
+        })
+    return out
 
 
 def _duration_text(seconds) -> str:
@@ -2157,6 +2209,40 @@ def _simple_cookie(name: str, value: str, domain: str = ""):
         comment_url=None, rest={}, rfc2109=False)
 
 
+def _failover_download(page_url: str, filename: str):
+    """Download through yt-dlp when a resolved CDN link has gone stale.
+
+    Returns a streaming response, or None when even this source refuses, so the
+    caller can report one clear error instead of two half-truths.
+    """
+    workdir = tempfile.mkdtemp(prefix="failover-")
+    try:
+        path = _download_playlist_item(page_url, workdir)
+        path = _apply_sponsor_metadata(path)
+        branded = _branded(filename)
+        size = os.path.getsize(path)
+
+        def stream_and_cleanup():
+            try:
+                with open(path, "rb") as fh:
+                    while True:
+                        chunk = fh.read(256 * 1024)
+                        if not chunk:
+                            break
+                        yield chunk
+            finally:
+                shutil.rmtree(workdir, ignore_errors=True)
+
+        return Response(stream_and_cleanup(), headers={
+            "Content-Type": "video/mp4",
+            "Content-Length": str(size),
+            "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(branded)}",
+        })
+    except Exception:  # noqa: BLE001 - the caller falls back to its own error
+        shutil.rmtree(workdir, ignore_errors=True)
+        return None
+
+
 def _selector_for_spec(spec: dict) -> str:
     """A yt-dlp format selector for a resolved spec."""
     if spec.get("video"):
@@ -2181,22 +2267,319 @@ def _download_to_file(page_url: str, selector: str, workdir: str,
     opts["skip_download"] = False
     opts["outtmpl"] = os.path.join(workdir, "media.%(ext)s")
     opts["merge_output_format"] = "mp4"
-    opts["format"] = selector
+    if selector:
+        opts["format"] = selector
+    cookie = _cookie_file()
+    if cookie:
+        opts["cookiefile"] = cookie
+
+    # A format that was listed at resolve time can be gone by the time the file
+    # is fetched (a live stream ended, a CDN trimmed its ladder). Retrying with a
+    # looser selector is cheaper than failing the download the user already chose.
+    attempts = [selector] if selector else [None]
+    if selector:
+        attempts += [a for a in ("bv*+ba/b", "b", None) if a != selector]
+
+    last_exc = None
+    for choice in attempts:
+        if choice:
+            opts["format"] = choice
+        else:
+            opts.pop("format", None)
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                # Carry over the cookies gathered while extracting, since the
+                # signed media URL is only valid alongside them.
+                for name, value in (cookies or {}).items():
+                    ydl.cookiejar.set_cookie(_simple_cookie(name, value))
+                ydl.extract_info(page_url, download=True)
+        except Exception as exc:  # noqa: BLE001 - try the next selector
+            last_exc = exc
+            for name in os.listdir(workdir):
+                try:
+                    os.remove(os.path.join(workdir, name))
+                except OSError:
+                    pass
+            continue
+
+        for name in sorted(os.listdir(workdir)):
+            if name.startswith("media.") and os.path.getsize(os.path.join(workdir, name)) > 0:
+                return os.path.join(workdir, name)
+
+    if last_exc is not None:
+        raise last_exc
+    raise SocialError("The file could not be produced.")
+
+
+# A playlist link is resolved flat and fast: entry URLs and titles only, no
+# per-video extraction, so a 200-item list comes back in seconds instead of
+# minutes. The user then picks what to download.
+# Each item is downloaded in full before the zip is sent, so this is really a
+# cap on how long one request may run.
+PLAYLIST_BATCH_LIMIT = 15
+
+_PLAYLIST_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com",
+                   "soundcloud.com", "vimeo.com", "dailymotion.com")
+
+
+def _looks_like_playlist(url: str) -> bool:
+    """Cheap check for a URL that names a collection rather than one video."""
+    parts = urllib.parse.urlparse(url)
+    host = (parts.hostname or "").lower()
+    if not any(_host_matches(host, (h,)) for h in _PLAYLIST_HOSTS):
+        return False
+    query = urllib.parse.parse_qs(parts.query)
+    path = parts.path.lower()
+    if "list" in query and query["list"]:
+        return True
+    if host.endswith("soundcloud.com") and "/sets/" in path:
+        return True
+    if "vimeo.com" in host and ("/album/" in path or "/channels/" in path
+                                or "/showcase/" in path):
+        return True
+    if "dailymotion.com" in host and path.startswith("/playlist/"):
+        return True
+    return False
+
+
+def _title_from_url(url: str) -> str:
+    """A readable name from a URL slug, used when flat entries carry no title."""
+    path = urllib.parse.urlparse(url or "").path.rstrip("/")
+    slug = path.rsplit("/", 1)[-1] if path else ""
+    slug = urllib.parse.unquote(slug)
+    slug = re.sub(r"[-_]+", " ", slug).strip()
+    # An API endpoint ends in a bare numeric id (`/tracks/295`); showing "295"
+    # as a title is worse than showing nothing and letting the caller fall back.
+    if not slug or slug.isdigit():
+        return ""
+    return slug[:1].upper() + slug[1:]
+
+
+def _playlist_entries(url: str) -> dict:
+    """Flat-extract a playlist into entries the UI can list and download."""
+    import yt_dlp
+
+    opts = _base_ydl_opts(quiet=True)
+    # Flat extraction skips per-video work; in_playlist keeps the entries in the
+    # order the playlist author chose.
+    opts.update({"extract_flat": "in_playlist", "noplaylist": False,
+                 "playlistend": 500, "skip_download": True})
     cookie = _cookie_file()
     if cookie:
         opts["cookiefile"] = cookie
 
     with yt_dlp.YoutubeDL(opts) as ydl:
-        # Carry over the cookies gathered while extracting, since the signed
-        # media URL is only valid alongside them.
-        for name, value in (cookies or {}).items():
-            ydl.cookiejar.set_cookie(_simple_cookie(name, value))
-        ydl.extract_info(page_url, download=True)
+        info = ydl.extract_info(url, download=False)
 
-    for name in sorted(os.listdir(workdir)):
-        if name.startswith("media."):
-            return os.path.join(workdir, name)
-    raise SocialError("The file could not be produced.")
+    if not isinstance(info, dict):
+        raise SocialError("That playlist could not be read.")
+    raw = [e for e in (info.get("entries") or []) if e]
+    if not raw:
+        raise SocialError("That playlist is empty or private.")
+
+    entries = []
+    for index, e in enumerate(raw, start=1):
+        page = e.get("url") or e.get("webpage_url") or ""
+        # Flat entries sometimes carry only an id; rebuild the watch URL so the
+        # download step has something to resolve.
+        if page and not page.lower().startswith("http"):
+            page = f"https://www.youtube.com/watch?v={page}"
+        entries.append({
+            "index": index,
+            "id": str(e.get("id") or index),
+            "title": (e.get("title") or _title_from_url(page)
+                      or f"Track {e.get('id') or index}"),
+            "url": page,
+            "duration": e.get("duration"),
+            "duration_text": _duration_text(e.get("duration")),
+            "uploader": e.get("uploader") or e.get("channel") or "",
+        })
+
+    return {
+        "url": url,
+        "title": info.get("title") or info.get("album") or "Playlist",
+        "uploader": info.get("uploader") or info.get("channel") or "",
+        "count": len(entries),
+        "truncated": len(raw) >= 500,
+        "entries": entries,
+    }
+
+
+@app.route("/api/social/playlist", methods=["POST"])
+def api_social_playlist():
+    """List the items in a playlist link."""
+    link = _request_link()
+    if not link:
+        return jsonify({"ok": False, "error": "Please paste a link first."}), 400
+    if not re.match(r"^https?://", link, re.I):
+        return jsonify({"ok": False, "error": "That does not look like a link."}), 400
+    try:
+        playlist = _playlist_entries(link)
+    except SocialError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001 - surfaced to the UI
+        return jsonify({"ok": False,
+                        "error": f"That playlist could not be read: {exc}"}), 500
+    return jsonify({"ok": True, "playlist": playlist})
+
+
+@app.route("/api/social/playlist/download")
+def api_social_playlist_download():
+    """Download selected playlist items and hand them over as one zip."""
+    link = request.args.get("link", "").strip()
+    wanted = request.args.get("items", "").strip()
+    if not link:
+        return jsonify({"ok": False, "error": "Missing playlist link."}), 400
+
+    try:
+        playlist = _playlist_entries(link)
+    except SocialError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    selected = playlist["entries"]
+    if wanted:
+        try:
+            # Accepts "1,3,5" or ranges like "1-5"; anything unparsable is
+            # ignored rather than failing the whole request.
+            keep = set()
+            for part in wanted.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                if "-" in part:
+                    lo, _, hi = part.partition("-")
+                    if lo.isdigit() and hi.isdigit():
+                        keep.update(range(int(lo), int(hi) + 1))
+                elif part.isdigit():
+                    keep.add(int(part))
+            selected = [e for e in playlist["entries"] if e["index"] in keep]
+        except (TypeError, ValueError):
+            selected = playlist["entries"]
+    if not selected:
+        return jsonify({"ok": False, "error": "No items were selected."}), 400
+    # A zip is only sent once every file inside it exists, so the request has to
+    # stay open for the whole batch. Capping the batch keeps it inside the
+    # server's 300s request timeout instead of dying at item 40 with nothing to
+    # show; the caller is told to send another batch for the rest.
+    if len(selected) > PLAYLIST_BATCH_LIMIT:
+        return jsonify({
+            "ok": False,
+            "error": (f"That is {len(selected)} items, and one zip holds at most "
+                      f"{PLAYLIST_BATCH_LIMIT}. Download the rest in another batch."),
+            "limit": PLAYLIST_BATCH_LIMIT,
+            "selected": len(selected),
+        }), 400
+
+    # A free host cannot hold a whole playlist in memory, so each file is written
+    # to disk and zipped from there; the zip is streamed as it is produced.
+    workdir = tempfile.mkdtemp(prefix="playlist-")
+    zip_path = os.path.join(workdir, "playlist.zip")
+    failures = []
+
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as archive:
+            for entry in selected:
+                item_dir = tempfile.mkdtemp(dir=workdir, prefix="item-")
+                try:
+                    path = _download_playlist_item(entry["url"], item_dir)
+                    name = _unique_zip_name(archive, entry, path)
+                    archive.write(path, arcname=name)
+                except Exception as exc:  # noqa: BLE001 - one bad item is not fatal
+                    failures.append({"title": entry["title"],
+                                     "reason": str(exc)[:160]})
+                finally:
+                    shutil.rmtree(item_dir, ignore_errors=True)
+
+            if failures:
+                # The failures travel with the zip so the user is not left
+                # wondering why a 20-item playlist produced 18 files.
+                archive.writestr("_failed_items.txt", _failure_report(failures))
+
+        if not archive_file_count(zip_path):
+            raise SocialError("None of the selected items could be downloaded.")
+
+        name = _branded(_safe_filename(playlist["title"], "playlist") + ".zip")
+        size = os.path.getsize(zip_path)
+
+        def stream_and_cleanup():
+            try:
+                with open(zip_path, "rb") as fh:
+                    while True:
+                        chunk = fh.read(256 * 1024)
+                        if not chunk:
+                            break
+                        yield chunk
+            finally:
+                shutil.rmtree(workdir, ignore_errors=True)
+
+        return Response(stream_and_cleanup(), headers={
+            "Content-Type": "application/zip",
+            "Content-Length": str(size),
+            "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(name)}",
+        })
+    except SocialError as exc:
+        shutil.rmtree(workdir, ignore_errors=True)
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(workdir, ignore_errors=True)
+        return jsonify({"ok": False, "error": f"Unexpected error: {exc}"}), 500
+
+
+def _download_playlist_item(page_url: str, workdir: str) -> str:
+    """Download one playlist entry, trying selectors that fit what it offers.
+
+    A single selector is not enough: `best` resolves to a legacy single-file
+    choice that modern YouTube does not serve, and a merge selector fails on
+    sites that only publish one combined file. Each attempt is a different shape
+    of source, and the first one that produces a file wins.
+    """
+    last_exc = None
+    for selector in ("bv*+ba/b", "b", None):
+        try:
+            return _download_to_file(page_url, selector, workdir, None)
+        except Exception as exc:  # noqa: BLE001 - try the next shape
+            last_exc = exc
+            # Clear any partial file so the next attempt starts clean.
+            for name in os.listdir(workdir):
+                try:
+                    os.remove(os.path.join(workdir, name))
+                except OSError:
+                    pass
+    raise last_exc or SocialError("That item could not be downloaded.")
+
+
+def archive_file_count(zip_path: str) -> int:
+    """How many real media files a zip holds (ignoring the failure report)."""
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            return sum(1 for n in archive.namelist() if not n.startswith("_"))
+    except zipfile.BadZipFile:
+        return 0
+
+
+def _failure_report(failures: list) -> str:
+    lines = ["These items could not be downloaded:", ""]
+    for f in failures:
+        lines.append(f"- {f['title']}: {f['reason']}")
+    return "\n".join(lines) + "\n"
+
+
+def _unique_zip_name(archive, entry: dict, path: str) -> str:
+    """A readable, collision-free name inside the zip."""
+    ext = os.path.splitext(path)[1] or ".mp4"
+    base = _safe_filename(f"{entry['index']:03d} - {entry['title']}", "item")
+    name = base + ext
+    seen = set(archive.namelist())
+    counter = 2
+    while name in seen:
+        name = f"{base} ({counter}){ext}"
+        counter += 1
+    return name
+
+
+def _safe_filename(text: str, fallback: str) -> str:
+    clean = re.sub(r"[^\w\-. ]+", "_", text or "").strip(" ._")
+    return (clean or fallback)[:120]
 
 
 @app.route("/api/social/platforms")
@@ -2289,23 +2672,32 @@ def api_social_download():
         headers = dict(spec.get("headers") or {})
         if request.headers.get("Range"):
             headers["Range"] = request.headers["Range"]
+        failure = None
         try:
             upstream = _request_session().get(spec["url"], headers=headers,
                                               cookies=spec.get("cookies") or None,
                                               stream=True, timeout=60)
-        except _request_error() as exc:
-            return jsonify({"ok": False, "error": f"Download failed: {exc}"}), 502
-        if upstream.status_code not in (200, 206):
+            if upstream.status_code in (200, 206):
+                filename = f"{safe}.{spec['ext']}"
+                tagged = _tagged_download(
+                    upstream, filename,
+                    upstream.headers.get("Content-Type") or "video/mp4")
+                if tagged is not None:
+                    return tagged
+                return _proxy_stream(upstream, as_attachment=True, filename=filename)
             upstream.close()
-            return jsonify({"ok": False, "error": f"The source returned status "
-                            f"{upstream.status_code}."}), 400
-        filename = f"{safe}.{spec['ext']}"
-        tagged = _tagged_download(
-            upstream, filename,
-            upstream.headers.get("Content-Type") or "video/mp4")
-        if tagged is not None:
-            return tagged
-        return _proxy_stream(upstream, as_attachment=True, filename=filename)
+            failure = f"the source returned status {upstream.status_code}"
+        except _request_error() as exc:
+            failure = str(exc)
+        # A signed CDN link goes stale between resolving and downloading, so a
+        # 403 here is routine rather than a real failure. Re-pull the file with
+        # yt-dlp, which negotiates its own fresh link.
+        retried = _failover_download(url, f"{safe}.mp4")
+        if retried is not None:
+            return retried
+        return jsonify({"ok": False,
+                        "error": f"Download failed: {failure}. Every source "
+                                 f"refused this file."}), 502
 
     # Anything that is not a single ready file - a video-only stream, an HLS
     # playlist, or a separate audio track - is downloaded and muxed to MP4.
@@ -2664,6 +3056,18 @@ INDEX_HTML = """<!doctype html>
   .frow .fm{color:var(--muted-2);font-size:.72rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .frow .fa{display:flex;gap:7px;flex-shrink:0;}
 
+  /* playlist */
+  .plbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+  .plcount{color:var(--muted-2);font-size:.76rem;margin-left:auto;}
+  .plitems{max-height:420px;overflow-y:auto;}
+  .plrow{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:10px;
+        background:linear-gradient(180deg,var(--surface),var(--bg-2));border:1px solid var(--border);}
+  .plrow input{width:16px;height:16px;flex-shrink:0;accent-color:var(--primary);cursor:pointer;}
+  .plidx{color:var(--muted-2);font-size:.72rem;font-weight:700;min-width:26px;flex-shrink:0;}
+  .plname{font-size:.8rem;font-weight:600;flex:1;min-width:0;overflow:hidden;
+          text-overflow:ellipsis;white-space:nowrap;}
+  .pldur{color:var(--muted-2);font-size:.72rem;flex-shrink:0;}
+
   /* Two columns on wide screens: the platform picker sits beside the input. */
   .social-grid{display:block;}
   @media (min-width:1000px){
@@ -2881,6 +3285,22 @@ INDEX_HTML = """<!doctype html>
           </div>
         </div>
       </div>
+
+          <div id="sPlaylist" class="hidden">
+            <div class="card">
+              <div class="fhead">
+                <span id="plTitle">Playlist</span>
+                <span class="fhint" id="plHint"></span>
+              </div>
+              <div class="plbar">
+                <button class="btn ghost sm" id="plAll">Select all</button>
+                <button class="btn ghost sm" id="plNone">Clear</button>
+                <span class="plcount" id="plCount"></span>
+                <button class="btn primary sm" id="plDownload">Download selected as ZIP</button>
+              </div>
+              <div id="plItems" class="flist plitems"></div>
+            </div>
+          </div>
 
       <aside class="col-side">
         <div class="card platwrap">
@@ -3905,6 +4325,9 @@ const S_PLAT = { other:{c:'#8b93a7',t:'?'} };
 const sLinkEl = $('sLink'), sFetchBtn = $('sFetch'), sClearBtn = $('sClear');
 const sPasteBtn = $('sPaste'), sStatusEl = $('sStatus');
 const sResult = $('sResult'), sThumb = $('sThumb'), sTitle = $('sTitle'), sSub = $('sSub'), sTags = $('sTags');
+const sPlaylist = $('sPlaylist'), plTitle = $('plTitle'), plHint = $('plHint');
+const plItems = $('plItems'), plCount = $('plCount'), plDownload = $('plDownload');
+const plAll = $('plAll'), plNone = $('plNone');
 const sFormats = $('sFormats'), platformsEl = $('platforms'), platCountEl = $('platCount');
 const platSearchEl = $('platSearch');
 const helpBadgeEl = $('helpBadge'), helpTitleEl = $('helpTitle');
@@ -4015,6 +4438,15 @@ function renderPlatforms(list){
   }
 }
 
+function sourceTag(media){
+  const attempts = media.attempts || [];
+  if (!attempts.length) return '';
+  const label = SOURCE_LABELS[media.source] || media.source;
+  // Nothing failed: the primary source answered, so no badge is needed.
+  return '<span class="rtag" title="' + esc(attempts.map(a => a.label + ': ' + a.reason).join(' | ')) +
+         '">Backup source: ' + esc(label) + '</span>';
+}
+
 function renderResult(media){
   socialMedia = media;
   sResult.classList.remove('hidden');
@@ -4034,7 +4466,8 @@ function renderResult(media){
   sTags.innerHTML =
     (pname ? '<span class="rtag">' + esc(pname) + '</span>' : '') +
     '<span class="rtag">' + media.formats.length + ' formats</span>' +
-    (media.can_play ? '<span class="rtag">Playable here</span>' : '<span class="rtag">Download only</span>');
+    (media.can_play ? '<span class="rtag">Playable here</span>' : '<span class="rtag">Download only</span>') +
+    sourceTag(media);
 
   sFormats.innerHTML = '';
   for (const f of media.formats) {
@@ -4103,12 +4536,110 @@ async function socialDownload(media, f, button){
   }
 }
 
+
+// Mirrors the server's check, so a playlist link never goes down the
+// single-video path and produces a confusing "no media" error.
+function looksLikePlaylist(link){
+  let u;
+  try { u = new URL(link); } catch (e) { return false; }
+  const host = u.hostname.replace(/^www\\./, '').toLowerCase();
+  const path = u.pathname.toLowerCase();
+  if (host.endsWith('soundcloud.com') && path.includes('/sets/')) return true;
+  if (host.includes('vimeo.com') && (path.includes('/album/') || path.includes('/channels/') || path.includes('/showcase/'))) return true;
+  if (host.includes('dailymotion.com') && path.startsWith('/playlist/')) return true;
+  const known = ['youtube.com','youtu.be','youtube-nocookie.com','soundcloud.com','vimeo.com','dailymotion.com'];
+  if (!known.some(h => host === h || host.endsWith('.' + h))) return false;
+  return u.searchParams.has('list');
+}
+let playlistState = null;
+
+const SOURCE_LABELS = {
+  'default': 'primary extractor',
+  'no-impersonate': 'plain HTTP client',
+  'alt-clients': 'alternate player clients',
+  'generic': 'generic extractor',
+  'html-scrape': 'page HTML',
+};
+
+async function socialFetchPlaylist(link){
+  sResult.classList.add('hidden');
+  sPlaylist.classList.remove('hidden');
+  plItems.innerHTML = '<div class="empty">Reading the playlist\u2026</div>';
+  plTitle.textContent = 'Playlist';
+  plHint.textContent = '';
+  plCount.textContent = '';
+  sSetStatus('Reading the playlist\u2026');
+  try {
+    const resp = await fetch('/api/social/playlist', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ link })
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      plItems.innerHTML = '';
+      sPlaylist.classList.add('hidden');
+      sSetStatus(data.error || 'That playlist could not be read.', true);
+      return;
+    }
+    playlistState = data.playlist;
+    renderPlaylist(data.playlist);
+    sSetStatus('Found ' + data.playlist.count + ' items in "' + data.playlist.title + '".');
+  } catch (e) {
+    sPlaylist.classList.add('hidden');
+    sSetStatus('Request failed: ' + e.message, true);
+  }
+}
+
+function renderPlaylist(pl){
+  plTitle.textContent = pl.title || 'Playlist';
+  plHint.textContent = pl.count + ' items' + (pl.uploader ? ' \u00b7 ' + pl.uploader : '');
+  plItems.innerHTML = '';
+  for (const e of pl.entries) {
+    const row = document.createElement('div');
+    row.className = 'plrow';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.index = e.index;
+    cb.addEventListener('change', updatePlCount);
+    const idx = document.createElement('span');
+    idx.className = 'plidx';
+    idx.textContent = e.index;
+    const name = document.createElement('span');
+    name.className = 'plname';
+    name.textContent = e.title;
+    name.title = e.title;
+    const dur = document.createElement('span');
+    dur.className = 'pldur';
+    dur.textContent = e.duration_text || '';
+    row.append(cb, idx, name, dur);
+    plItems.appendChild(row);
+  }
+  updatePlCount();
+}
+
+function plSelected(){
+  return [...plItems.querySelectorAll('input:checked')].map(cb => cb.dataset.index);
+}
+
+function updatePlCount(){
+  const n = plSelected().length;
+  plCount.textContent = n ? n + ' selected' : 'none selected';
+  plDownload.disabled = n === 0;
+}
+
 async function socialFetch(){
   const link = sLinkEl.value.trim();
   if (!link) { sSetStatus('Please paste a link first.', true); return; }
   sFetchBtn.disabled = true;
   sSetStatus('Reading the link\u2026');
   sResult.classList.add('hidden');
+  // A playlist link is a different shape of result, so it is routed before
+  // the single-video path rather than failing there.
+  if (looksLikePlaylist(link)) {
+    await socialFetchPlaylist(link);
+    sFetchBtn.disabled = false;
+    return;
+  }
   try {
     const resp = await fetch('/api/social/resolve', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4124,6 +4655,31 @@ async function socialFetch(){
     sFetchBtn.disabled = false;
   }
 }
+
+plAll.addEventListener('click', () => {
+  plItems.querySelectorAll('input').forEach(cb => { cb.checked = true; });
+  updatePlCount();
+});
+plNone.addEventListener('click', () => {
+  plItems.querySelectorAll('input').forEach(cb => { cb.checked = false; });
+  updatePlCount();
+});
+plDownload.addEventListener('click', () => {
+  const picked = plSelected();
+  if (!picked.length) return;
+  sSetStatus('Building the ZIP for ' + picked.length + ' items\u2026 this takes a moment.');
+  const url = '/api/social/playlist/download?link=' + encodeURIComponent(playlistState.url)
+            + '&items=' + encodeURIComponent(picked.join(','));
+  // The zip only arrives once every item inside it exists, so the browser waits
+  // on a hidden iframe instead of a fetch that would hold the whole zip in RAM.
+  const frame = document.createElement('iframe');
+  frame.style.display = 'none';
+  frame.src = url;
+  document.body.appendChild(frame);
+  setTimeout(() => frame.remove(), 900000);
+  addHistory({ kind: 'downloaded', name: playlistState.title + ' (' + picked.length + ' items)',
+    id: 'zip', link: playlistState.url, is_video: false, source: 'social', tag: 'ZIP' });
+});
 
 sFetchBtn.addEventListener('click', socialFetch);
 sLinkEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); socialFetch(); } });

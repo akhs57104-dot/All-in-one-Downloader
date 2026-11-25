@@ -111,6 +111,37 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
   like code bugs but are not. Public posts on the platforms that allow
   anonymous access are the ones to measure against.
 
+- **Source failover (`_EXTRACT_STRATEGIES`).** `_extract_info()` walks an ordered
+  chain - `default` -> `no-impersonate` -> `alt-clients` -> `generic` ->
+  `html-scrape` - and returns the first strategy that yields media. Each
+  strategy is a different *kind* of source, not a retry of the same one: a bot
+  check wants a browser fingerprint, a stale player client wants a different
+  one, a broken extractor wants the generic one. The winning name lands in
+  `info["_source"]` and the refusals in `info["_attempts"]`, which
+  `social_extract()` exposes as `source` / `attempts`; the UI shows a "Backup
+  source" badge when the chain had to shift. `_download_to_file()` does the same
+  for selectors, and `/api/social/download` retries a stale CDN link through
+  `_failover_download()` before reporting an error.
+- **YouTube is IP-blocked on this host.** Every player client (`android_vr`,
+  `ios`, `tv`, `web_safari`, `mweb`, `android`, `tv_embedded`) returns either
+  `HTTP 403` on the media URL or "Sign in to confirm you're not a bot". Metadata
+  extraction still works, so playlists list fine, but downloads fail. That is
+  the datacenter IP, not the code; it needs a cookies file or a residential
+  proxy to change.
+- **Playlists** are detected by `_looks_like_playlist()` (mirrored in JS as
+  `looksLikePlaylist()`) for YouTube (`?list=`), SoundCloud `/sets/`, Vimeo
+  `/album/`, `/channels/`, `/showcase/`, and Dailymotion `/playlist/`.
+  `_playlist_entries()` reads them flat (`extract_flat: "in_playlist"`, capped
+  at 500) so a 182-item list comes back in seconds. Flat entries often carry no
+  title: `_title_from_url()` recovers one from the URL slug and returns `""` for
+  bare numeric API ids, so the caller falls back to `Track <id>` instead of
+  showing "295".
+- **Playlist downloads are one zip per request.** `PLAYLIST_BATCH_LIMIT` (15)
+  exists because the zip is only sent after every item exists, so the request
+  must outlive the whole batch inside gunicorn's 300s timeout. Items that fail
+  are listed in `_failed_items.txt` inside the zip instead of failing the whole
+  request.
+
 ## Routes
 
 - `GET /` — the single-page UI.
@@ -118,6 +149,9 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
 - `POST /api/social/resolve` — extract metadata + formats (yt-dlp).
 - `GET /api/social/stream` — stream one format for playback (Range-capable).
 - `GET /api/social/download` — save one format as a file (ffmpeg-merged if needed).
+- `POST /api/social/playlist` — flat-list a playlist's entries (JSON).
+- `GET /api/social/playlist/download` — download selected items (`items=1,3,5`
+  or `1-5`) and stream them back as one zip.
 - `GET /api/social/hls/<token>/<n>.ts` — proxy one HLS segment.
 - `POST /api/resolve` — list a share's files (TeraBox, else helper).
 - `GET /api/prepare` — warm a file's helper entry so the next `/api/hls` is
