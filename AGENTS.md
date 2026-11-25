@@ -22,6 +22,8 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
     `tools/fetch-ffmpeg.sh` instead, which puts a static ffmpeg and ffprobe in
     `bin/`. `_ffmpeg_path()` checks `bin/ffmpeg` before `PATH`, and `bin/` is
     gitignored (153 MB for both binaries) because that script rebuilds it.
+    `run.sh` does both steps itself on start, so a recycled container recovers
+    without anyone noticing.
 
 ## TeraBox API facts (measured)
 

@@ -18,6 +18,18 @@ case "$PORT" in
 esac
 LOG="${LOG:-/tmp/techarslan.log}"
 
+# The container is recycled between sessions, which empties site-packages and
+# drops binaries installed outside bin/. Restore both before starting instead of
+# dying in a restart loop with "gunicorn is not installed".
+if ! python3 -c "import flask, gunicorn" >/dev/null 2>&1; then
+  echo "[run.sh] $(date -Is) dependencies missing; installing" >>"$LOG"
+  python3 -m pip install -q -r requirements.txt >>"$LOG" 2>&1
+fi
+if [ ! -x bin/ffmpeg ]; then
+  echo "[run.sh] $(date -Is) ffmpeg missing; fetching" >>"$LOG"
+  ./tools/fetch-ffmpeg.sh >>"$LOG" 2>&1
+fi
+
 while true; do
   echo "[run.sh] $(date -Is) starting gunicorn on :$PORT" >>"$LOG"
   ./start.sh >>"$LOG" 2>&1

@@ -27,6 +27,9 @@ falls back to `PATH`, so a host with no root can install it locally:
 ./tools/fetch-ffmpeg.sh   # static ffmpeg + ffprobe into bin/
 ```
 
+`run.sh` checks both on every start and installs whatever is missing, so a host
+that wipes its packages between deploys still comes up on its own.
+
 ## Deploy
 
 The app keeps short-lived state in process memory - resolved HLS playlists and
