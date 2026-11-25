@@ -1704,9 +1704,33 @@ def _strategy_opts(strategy: str) -> dict:
             "youtube": {"player_client": ["android_vr", "ios", "tv", "web_safari"]}
         }
         return opts
+    if strategy == "android-client":
+        # android/android_vr were the only pair that served formats when the
+        # browser clients were answering a bot check.
+        opts = _base_ydl_opts()
+        opts["extractor_args"] = {
+            "youtube": {"player_client": ["android", "android_vr", "ios"]}
+        }
+        return opts
+    if strategy == "hls-only":
+        # When progressive downloads are refused, YouTube's HLS ladder is a
+        # separate host with its own luck. Forcing it is the last real chance
+        # before the generic extractor, which cannot see HLS at all.
+        opts = _base_ydl_opts()
+        opts["format"] = "b[protocol*=m3u8]/bv*[protocol*=m3u8]/b"
+        return opts
     if strategy == "generic":
         return dict(_base_ydl_opts(), force_generic_extractor=True)
     return _base_ydl_opts()
+
+
+# Extraction and download share this order. A site can hand over metadata and
+# still refuse the file, so the download has to be able to walk the same chain:
+# a route that fails to produce bytes is not the same as a route that cannot see
+# the video.
+_STRATEGIES = ("default", "no-impersonate", "alt-clients", "android-client",
+               "hls-only", "generic")
+_EXTRACT_STRATEGIES = _STRATEGIES
 
 
 def _extract_info(url: str) -> tuple:
@@ -2095,20 +2119,35 @@ _SOURCE_LABELS = {
     "default": "primary extractor",
     "no-impersonate": "plain HTTP client",
     "alt-clients": "alternate player clients",
+    "android-client": "Android player client",
+    "hls-only": "HLS stream ladder",
     "generic": "generic extractor",
     "html-scrape": "page HTML",
 }
 
 
 def _attempts_public(attempts) -> list:
-    """Turn the internal attempt log into what the UI shows."""
+    """Turn the internal attempt log into what the UI shows.
+
+    One entry per route, not per selector: a route that was retried with a looser
+    format is still the same route, and repeating it six times buries the one
+    detail that matters - which sources were walked. The last reason is kept
+    because it is the one that ended the route.
+    """
     out = []
+    by_source = {}
     for strategy, reason in (attempts or []):
-        out.append({
-            "source": strategy,
-            "label": _SOURCE_LABELS.get(strategy, strategy),
-            "reason": reason,
-        })
+        entry = by_source.get(strategy)
+        if entry is None:
+            entry = {
+                "source": strategy,
+                "label": _SOURCE_LABELS.get(strategy, strategy),
+                "reason": reason,
+            }
+            by_source[strategy] = entry
+            out.append(entry)
+        else:
+            entry["reason"] = reason
     return out
 
 
@@ -2329,57 +2368,128 @@ def _selector_for_spec(spec: dict) -> str:
     return spec.get("format_id") or "best"
 
 
+def _clear_dir(workdir: str) -> None:
+    """Drop partial files so the next route starts from nothing."""
+    for name in os.listdir(workdir):
+        try:
+            os.remove(os.path.join(workdir, name))
+        except OSError:
+            pass
+
+
+# Which routes were tried for the download in this thread, and why each failed.
+# Thread-local because the server answers several downloads at once: a shared
+# list would interleave one request's attempts into another's error message.
+_ROUTE_LOG = threading.local()
+_ROUTE_WIN = threading.local()
+
+
+def _route_log() -> list:
+    log = getattr(_ROUTE_LOG, "entries", None)
+    if log is None:
+        log = _ROUTE_LOG.entries = []
+    return log
+
+
+def _route_log_reset() -> None:
+    _route_log().clear()
+
+
+def _route_log_add(strategy: str, reason: str) -> None:
+    _route_log().append((strategy, reason))
+
+
+def _route_win_set(strategy: str) -> None:
+    """Remember the route that produced the file, for the response header."""
+    _ROUTE_WIN.value = strategy
+
+
+def _route_win() -> str:
+    """The route that produced the file, or empty when it was the first one.
+
+    An empty result means the normal case and needs no comment. Only a file that
+    arrived from a fallback is worth saying out loud, otherwise every download
+    would announce a rescue that never happened.
+    """
+    strategy = getattr(_ROUTE_WIN, "value", "")
+    if not strategy or strategy == _STRATEGIES[0]:
+        return ""
+    return _SOURCE_LABELS.get(strategy, strategy)
+
+
+def _produced_file(workdir: str) -> str:
+    for name in sorted(os.listdir(workdir)):
+        path = os.path.join(workdir, name)
+        if name.startswith("media.") and os.path.getsize(path) > 0:
+            return path
+    return ""
+
+
 def _download_to_file(page_url: str, selector: str, workdir: str,
-                      cookies: dict) -> str:
+                      cookies: dict, strategies=None) -> str:
     """Download a format (merging audio when needed) into `workdir`.
 
-    yt-dlp drives the download so HLS playlists and DASH pairs are handled the
-    same way; ffmpeg does the muxing for separate video and audio tracks.
+    Two axes are walked, cheapest first. Within one route the format selector is
+    loosened, because a format listed at resolve time can vanish before the file
+    is fetched. Then the route itself changes, because a source that hands over
+    metadata can still refuse the bytes - a 403 from one player client says
+    nothing about the next one. yt-dlp drives the download so HLS playlists and
+    DASH pairs are handled the same way; ffmpeg muxes separate tracks.
     """
     import yt_dlp
 
-    opts = _base_ydl_opts(quiet=True)
-    opts["skip_download"] = False
-    opts["outtmpl"] = os.path.join(workdir, "media.%(ext)s")
-    opts["merge_output_format"] = "mp4"
-    if selector:
-        opts["format"] = selector
     cookie = _cookie_file()
-    if cookie:
-        opts["cookiefile"] = cookie
-
-    # A format that was listed at resolve time can be gone by the time the file
-    # is fetched (a live stream ended, a CDN trimmed its ladder). Retrying with a
-    # looser selector is cheaper than failing the download the user already chose.
-    attempts = [selector] if selector else [None]
-    if selector:
-        attempts += [a for a in ("bv*+ba/b", "b", None) if a != selector]
-
     last_exc = None
-    for choice in attempts:
-        if choice:
-            opts["format"] = choice
-        else:
-            opts.pop("format", None)
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                # Carry over the cookies gathered while extracting, since the
-                # signed media URL is only valid alongside them.
-                for name, value in (cookies or {}).items():
-                    ydl.cookiejar.set_cookie(_simple_cookie(name, value))
-                ydl.extract_info(page_url, download=True)
-        except Exception as exc:  # noqa: BLE001 - try the next selector
-            last_exc = exc
-            for name in os.listdir(workdir):
-                try:
-                    os.remove(os.path.join(workdir, name))
-                except OSError:
-                    pass
-            continue
+    routes = tuple(strategies or _STRATEGIES)
+    _route_log_reset()
+    _route_win_set("")
 
-        for name in sorted(os.listdir(workdir)):
-            if name.startswith("media.") and os.path.getsize(os.path.join(workdir, name)) > 0:
-                return os.path.join(workdir, name)
+    for strategy in routes:
+        try:
+            opts = _strategy_opts(strategy)
+        except Exception as exc:  # noqa: BLE001 - a route that cannot be configured
+            _route_log_add(strategy, str(exc)[:160])
+            last_exc = exc
+            continue
+        opts["skip_download"] = False
+        opts["outtmpl"] = os.path.join(workdir, "media.%(ext)s")
+        opts["merge_output_format"] = "mp4"
+        if cookie:
+            opts["cookiefile"] = cookie
+        # hls-only already pins the format; overriding it would undo the point.
+        pinned = opts.get("format") if strategy == "hls-only" else None
+
+        attempts = [pinned or selector] if (pinned or selector) else [None]
+        if not pinned:
+            if selector:
+                attempts += [a for a in ("bv*+ba/b", "b", None) if a != selector]
+        else:
+            attempts = [pinned, "b"]
+
+        for choice in attempts:
+            if choice:
+                opts["format"] = choice
+            else:
+                opts.pop("format", None)
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    # Carry over the cookies gathered while extracting, since the
+                    # signed media URL is only valid alongside them.
+                    for name, value in (cookies or {}).items():
+                        ydl.cookiejar.set_cookie(_simple_cookie(name, value))
+                    ydl.extract_info(page_url, download=True)
+            except Exception as exc:  # noqa: BLE001 - try the next shape or route
+                last_exc = exc
+                _route_log_add(strategy, str(exc)[:160])
+                _clear_dir(workdir)
+                continue
+
+            produced = _produced_file(workdir)
+            if produced:
+                _route_win_set(strategy)
+                return produced
+            _route_log_add(strategy, "no file was written")
+            _clear_dir(workdir)
 
     if last_exc is not None:
         raise last_exc
@@ -2568,7 +2678,8 @@ def api_social_playlist_download():
                     # nothing about whether to retry or give up, so each failure is
                     # recorded with the same advice the single-item path gives.
                     failures.append({"title": entry["title"],
-                                     "reason": _friendly_download_error(exc)[:160]})
+                                     "reason": _friendly_download_error(exc)[:160],
+                                     "routes": _attempts_public(_route_log())})
                 finally:
                     shutil.rmtree(item_dir, ignore_errors=True)
 
@@ -2618,26 +2729,25 @@ def api_social_playlist_download():
         return jsonify({"ok": False, "error": f"Unexpected error: {exc}"}), 500
 
 
-def _download_playlist_item(page_url: str, workdir: str) -> str:
-    """Download one playlist entry, trying selectors that fit what it offers.
+def _download_playlist_item(page_url: str, workdir: str,
+                            strategies=None) -> str:
+    """Download one playlist entry, trying selectors and then routes.
 
     A single selector is not enough: `best` resolves to a legacy single-file
     choice that modern YouTube does not serve, and a merge selector fails on
-    sites that only publish one combined file. Each attempt is a different shape
-    of source, and the first one that produces a file wins.
+    sites that only publish one combined file. A single route is not enough
+    either - the route that listed the entry may be exactly the one the CDN
+    refuses - so the selectors are walked inside each route and the whole chain
+    is retried on the next one.
     """
     last_exc = None
     for selector in ("bv*+ba/b", "b", None):
         try:
-            return _download_to_file(page_url, selector, workdir, None)
+            return _download_to_file(page_url, selector, workdir, None,
+                                     strategies=strategies)
         except Exception as exc:  # noqa: BLE001 - try the next shape
             last_exc = exc
-            # Clear any partial file so the next attempt starts clean.
-            for name in os.listdir(workdir):
-                try:
-                    os.remove(os.path.join(workdir, name))
-                except OSError:
-                    pass
+            _clear_dir(workdir)
     raise last_exc or SocialError("That item could not be downloaded.")
 
 
@@ -2653,7 +2763,10 @@ def archive_file_count(zip_path: str) -> int:
 def _failure_report(failures: list) -> str:
     lines = ["These items could not be downloaded:", ""]
     for f in failures:
-        lines.append(f"- {f['title']}: {f['reason']}")
+        routes = f.get("routes") or []
+        tried = ", ".join(r["label"] for r in routes) if routes else ""
+        suffix = f" (tried: {tried})" if tried else ""
+        lines.append(f"- {f['title']}: {f['reason']}{suffix}")
     return "\n".join(lines) + "\n"
 
 
@@ -2820,17 +2933,26 @@ def api_social_download():
                 shutil.rmtree(workdir, ignore_errors=True)
 
         size = os.path.getsize(path)
-        return Response(stream_and_cleanup(), headers={
+        # A file that only the fourth route would serve is worth saying out loud;
+        # an empty value means the first one worked.
+        served = _route_win()
+        headers = {
             "Content-Type": "video/mp4",
             "Content-Length": str(size),
             "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(branded)}",
-        })
+        }
+        if served:
+            headers["X-Route"] = served
+            headers["Access-Control-Expose-Headers"] = "X-Route"
+        return Response(stream_and_cleanup(), headers=headers)
     except SocialError as exc:
         shutil.rmtree(workdir, ignore_errors=True)
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify({"ok": False, "error": str(exc),
+                        "routes": _attempts_public(_route_log())}), 400
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(workdir, ignore_errors=True)
-        return jsonify({"ok": False, "error": f"Unexpected error: {exc}"}), 500
+        return jsonify({"ok": False, "error": f"Unexpected error: {exc}",
+                        "routes": _attempts_public(_route_log())}), 500
 
 
 @app.route("/api/social/hls/<token>/<int:index>.ts")
@@ -4610,23 +4732,53 @@ async function socialDownload(media, f, button){
   button.textContent = 'Preparing\u2026';
   sSetStatus(f.progressive ? 'Preparing download\u2026'
                            : 'Merging video and audio on the server\u2026 this can take a moment.');
-  // The server sends the file as an attachment, so a hidden iframe starts the
-  // browser's own download and keeps the page responsive.
+  // Fetched rather than handed to a hidden iframe: a refusal comes back as JSON,
+  // and an iframe renders that invisibly, leaving the user staring at an
+  // unchanged page with no idea which sources were tried.
   try {
-    const frame = document.createElement('iframe');
-    frame.style.display = 'none';
-    frame.src = url;
-    document.body.appendChild(frame);
-    setTimeout(() => frame.remove(), 120000);
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      let why = 'That file could not be downloaded.';
+      let routes = [];
+      try { const d = await resp.json(); why = d.error || why; routes = d.routes || []; }
+      catch (e) { /* the body was not JSON */ }
+      sSetStatus(why + describeRoutes(routes), true);
+      return;
+    }
+    const blob = await resp.blob();
+    const disp = resp.headers.get('Content-Disposition') || '';
+    const named = disp.match(/filename\\*=UTF-8''([^;]+)/);
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = named ? decodeURIComponent(named[1]) : brandName(media.title) + '.mp4';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 120000);
+    // Set only when a fallback route produced the file; the primary route is the
+    // normal case and should not be announced as unusual.
+    const served = resp.headers.get('X-Route');
+    sSetStatus(served
+      ? 'Downloaded. The primary source refused it, so this came from the ' + served + '.'
+      : 'Downloaded.');
     addHistory({ kind: 'downloaded', name: brandName(media.title), id: f.format_id, link: media.url,
       is_video: true, source: 'social', playable: !!f.playable,
       progressive: !!f.progressive, tag: f.label });
-    setTimeout(() => sSetStatus('Download started. If nothing happened, the source refused it.'), 2500);
   } catch (e) {
     sSetStatus('Download failed to start: ' + e.message, true);
   } finally {
-    setTimeout(() => { button.disabled = false; button.textContent = label; }, 1500);
+    button.disabled = false; button.textContent = label;
   }
+}
+
+// The routes a failed download walked, as a short clause. Which sources were
+// tried is what separates "retry later" from "this site is blocked here".
+function describeRoutes(routes){
+  if (!routes || !routes.length) return '';
+  const names = routes.map(r => r.label).filter((v, i, a) => a.indexOf(v) === i);
+  if (names.length === 1) return ' (' + names[0] + ' could not serve it)';
+  return ' (tried: ' + names.join(', ') + ')';
 }
 
 

@@ -118,6 +118,30 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
   instances (401/403/530/connection refused), five Piped instances (one returns
   metadata but no `proxyUrl`, rest 502/404), five cobalt instances (JWT required,
   Cloudflare 1033, timeouts).
+- **Downloads walk a chain of routes, not one.** `_STRATEGIES` is shared by
+  extraction and download: `default`, `no-impersonate`, `alt-clients`,
+  `android-client`, `hls-only`, `generic`. `_download_to_file()` tries each route
+  and, inside a route, loosens the format selector (`bv*+ba/b` -> `b` -> none);
+  a route that refuses the bytes hands over to the next one. This matters because
+  a source can return full metadata and still 403 the media - measured on YouTube,
+  where all six routes were walked before failing.
+  Each route was verified to produce a file on its own by running the chain with
+  only that route (`_download_playlist_item(url, dir, strategies=(route,))`):
+  `no-impersonate`, `alt-clients`, `android-client`, `hls-only` and `generic` all
+  returned the same 4214 KB SoundCloud track, so the fallbacks are real and not
+  decorative.
+- The response says which route served the file: `X-Route` (exposed via
+  `Access-Control-Expose-Headers`) is set **only when a fallback produced it**, so
+  the normal first-route download stays quiet. A failure returns the walked routes
+  as `{"routes": [{"source", "label", "reason"}]}`, deduped to one entry per route
+  by `_attempts_public()`, and the page prints them as "(tried: ...)".
+  Per-request state lives in `threading.local()` (`_ROUTE_LOG`, `_ROUTE_WIN`) because
+  gunicorn runs 8 threads; a plain global interleaved one download's attempts into
+  another's message. Note `threading.local()` takes attribute assignment, not
+  `.set()` - that mistake raised AttributeError on every download until caught.
+- The single-download button uses `fetch`, not a hidden iframe. An iframe renders a
+  JSON error body invisibly, so a refusal looked like nothing happening; the fetch
+  path can read the JSON and print the reason plus the routes tried.
 - `_friendly_download_error()` names that hosting block *before* the cookie
   case, because yt-dlp's own text ("403", "Requested format is not available")
   otherwise reaches the user verbatim - the playlist path used to show
