@@ -141,11 +141,17 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
   title: `_title_from_url()` recovers one from the URL slug and returns `""` for
   bare numeric API ids, so the caller falls back to `Track <id>` instead of
   showing "295".
-- **Playlist downloads are one zip per request.** `PLAYLIST_BATCH_LIMIT` (15)
+- **Playlist downloads are one zip per request.** `PLAYLIST_BATCH_LIMIT` (40)
   exists because the zip is only sent after every item exists, so the request
-  must outlive the whole batch inside gunicorn's 300s timeout. Items that fail
-  are listed in `_failed_items.txt` inside the zip instead of failing the whole
-  request.
+  must outlive the whole batch inside gunicorn's 300s timeout; 11 SoundCloud
+  tracks measured ~42s. The page splits a larger selection into parts, so "Select
+  all" on a 182-item list still works. Items that fail are listed in
+  `_failed_items.txt` inside the zip instead of failing the whole request, and the
+  response carries `X-Playlist-Items` / `X-Playlist-Failures`.
+- A playlist zip is fetched with `fetch()` and saved from a blob, not through a
+  hidden iframe: an iframe renders an error response invisibly, so a rejected
+  request looked like nothing happening at all. When every item fails, the error
+  carries the first item's reason so the user can act on it.
 
 ## Routes
 

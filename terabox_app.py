@@ -591,7 +591,8 @@ def index():
     page = (INDEX_HTML
             .replace("__SPONSOR_NAME__", escape(SPONSOR_NAME))
             .replace("__SPONSOR_URL__", escape(SPONSOR_URL))
-            .replace("__SPONSOR_TAGLINE__", escape(SPONSOR_TAGLINE)))
+            .replace("__SPONSOR_TAGLINE__", escape(SPONSOR_TAGLINE))
+            .replace("__PLAYLIST_BATCH_LIMIT__", str(PLAYLIST_BATCH_LIMIT)))
     return Response(page, mimetype="text/html")
 
 @app.route("/healthz")
@@ -2331,7 +2332,11 @@ def _download_to_file(page_url: str, selector: str, workdir: str,
 # minutes. The user then picks what to download.
 # Each item is downloaded in full before the zip is sent, so this is really a
 # cap on how long one request may run.
-PLAYLIST_BATCH_LIMIT = 15
+# A zip is streamed only once every file in it exists, so one request has to stay
+# open for the whole batch inside the server's 300s timeout. 40 items fits: at the
+# measured ~5s per track a batch finishes well before the timeout, and it is far
+# enough that a typical mix playlist goes in one go.
+PLAYLIST_BATCH_LIMIT = 40
 
 _PLAYLIST_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com",
                    "soundcloud.com", "vimeo.com", "dailymotion.com")
@@ -2511,7 +2516,13 @@ def api_social_playlist_download():
                 archive.writestr("_failed_items.txt", _failure_report(failures))
 
         if not archive_file_count(zip_path):
-            raise SocialError("None of the selected items could be downloaded.")
+            # The per-item reasons are the only thing that tells a user whether to
+            # retry, sign in, or pick different items, so they travel with the error.
+            first = failures[0] if failures else {}
+            detail = f" First failure: {first.get('title')}: {first.get('reason')}." if first else ""
+            raise SocialError(
+                f"None of the {len(selected)} selected items could be downloaded."
+                f"{detail}")
 
         name = _branded(_safe_filename(playlist["title"], "playlist") + ".zip")
         size = os.path.getsize(zip_path)
@@ -2531,6 +2542,11 @@ def api_social_playlist_download():
             "Content-Type": "application/zip",
             "Content-Length": str(size),
             "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(name)}",
+            # A zip holding fewer files than the user picked looks like a
+            # failure, so the counts are exposed for the page to report.
+            "X-Playlist-Items": str(len(selected) - len(failures)),
+            "X-Playlist-Failures": str(len(failures)),
+            "Access-Control-Expose-Headers": "X-Playlist-Items, X-Playlist-Failures",
         })
     except SocialError as exc:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -4576,6 +4592,9 @@ const SOURCE_LABELS = {
   'html-scrape': 'page HTML',
 };
 
+// Mirrors the server cap, which stops a batch from outliving the request timeout.
+const PLAYLIST_BATCH_LIMIT = Number('__PLAYLIST_BATCH_LIMIT__') || 40;
+
 async function socialFetchPlaylist(link){
   sResult.classList.add('hidden');
   sPlaylist.classList.remove('hidden');
@@ -4679,21 +4698,73 @@ plNone.addEventListener('click', () => {
   plItems.querySelectorAll('input').forEach(cb => { cb.checked = false; });
   updatePlCount();
 });
-plDownload.addEventListener('click', () => {
+plDownload.addEventListener('click', async () => {
   const picked = plSelected();
   if (!picked.length) return;
-  sSetStatus('Building the ZIP for ' + picked.length + ' items\u2026 this takes a moment.');
-  const url = '/api/social/playlist/download?link=' + encodeURIComponent(playlistState.url)
-            + '&items=' + encodeURIComponent(picked.join(','));
-  // The zip only arrives once every item inside it exists, so the browser waits
-  // on a hidden iframe instead of a fetch that would hold the whole zip in RAM.
-  const frame = document.createElement('iframe');
-  frame.style.display = 'none';
-  frame.src = url;
-  document.body.appendChild(frame);
-  setTimeout(() => frame.remove(), 900000);
-  addHistory({ kind: 'downloaded', name: playlistState.title + ' (' + picked.length + ' items)',
-    id: 'zip', link: playlistState.url, is_video: false, source: 'social', tag: 'ZIP' });
+  // One request holds the connection open until every file in its zip exists, so
+  // the server caps a batch. Splitting here means "select all" on a long playlist
+  // still works instead of coming back as a limit error the user cannot act on.
+  const batches = [];
+  for (let i = 0; i < picked.length; i += PLAYLIST_BATCH_LIMIT) {
+    batches.push(picked.slice(i, i + PLAYLIST_BATCH_LIMIT));
+  }
+  plDownload.disabled = true;
+  let ok = 0, bad = 0, firstError = '';
+  try {
+    for (let b = 0; b < batches.length; b++) {
+      const chunk = batches[b];
+      const part = batches.length > 1 ? ' (part ' + (b + 1) + ' of ' + batches.length + ')' : '';
+      sSetStatus(part
+        ? 'Building ZIP' + part + ' for ' + chunk.length + ' items\u2026'
+        : 'Building the ZIP for ' + chunk.length + ' items\u2026 this takes a moment.');
+      const url = '/api/social/playlist/download?link=' + encodeURIComponent(playlistState.url)
+                + '&items=' + encodeURIComponent(chunk.join(','));
+      // A hidden iframe starts the browser's own download, but a failed request
+      // answers with JSON that the iframe renders invisibly, so the user ends up
+      // staring at an unchanged page. Fetching keeps the error text readable.
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        let why = 'That ZIP could not be built.';
+        try { const d = await resp.json(); why = d.error || why; } catch (e) { /* body was not JSON */ }
+        // Kept rather than shown now: the next batch would overwrite the status.
+        if (!firstError) firstError = why;
+        bad += chunk.length;
+        continue;
+      }
+      const blob = await resp.blob();
+      const savedN = +(resp.headers.get('X-Playlist-Items') || 0);
+      const failedN = +(resp.headers.get('X-Playlist-Failures') || 0);
+      const disp = resp.headers.get('Content-Disposition') || '';
+      const named = disp.match(/filename\\*=UTF-8''([^;]+)/);
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = named ? decodeURIComponent(named[1]) : 'playlist.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 120000);
+      ok += savedN;
+      bad += failedN;
+      // Browsers only honour one automatic download per gesture unless they are
+      // asked; a short gap between parts keeps the rest from being dropped.
+      if (b < batches.length - 1) await new Promise(r => setTimeout(r, 1200));
+    }
+    if (!ok) {
+      sSetStatus('No files could be downloaded: ' + bad + ' item'
+        + (bad === 1 ? '' : 's') + ' failed. ' + (firstError || ''), true);
+    } else {
+      sSetStatus('Done: ' + ok + ' file' + (ok === 1 ? '' : 's') + ' downloaded'
+        + (bad ? ', ' + bad + ' failed (listed in _failed_items.txt inside the ZIP)' : '') + '.');
+      addHistory({ kind: 'downloaded', name: playlistState.title + ' (' + ok + ' items)',
+        id: 'zip', link: playlistState.url, is_video: false, source: 'social', tag: 'ZIP' });
+    }
+  } catch (e) {
+    sSetStatus('Request failed: ' + e.message, true);
+  } finally {
+    plDownload.disabled = false;
+    updatePlCount();
+  }
 });
 
 sFetchBtn.addEventListener('click', socialFetch);
