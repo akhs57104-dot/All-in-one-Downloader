@@ -64,6 +64,14 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
   `impersonate="chrome124"`.
 - A session cookie is bound to one TeraBox host and answers `errno -6` on others.
 - Soft rate limit: `errno 105` / `460030` after a burst; wait a minute.
+- **Known-good link for smoke tests** (public, resolves to one 118.86 MB
+  `Ttsunade.zip`): `https://terabox.com/s/1DcGWQPuMVDgkXrFhP7AlcQ`. It carries no
+  video, so it exercises resolve, `/api/download` and the "no stream" answer from
+  `/api/hls` but not playback. Share links expire: when this one stops resolving,
+  find a fresh one with GitHub code search
+  (`https://api.github.com/search/code?q=%22terabox.com%2Fs%2F%22+in:file`) and
+  grep the raw file for `terabox.*\.(com|app)/(s|sharing)/[A-Za-z0-9_-]{8,}`. Most
+  hits are placeholders like `1abcdEFGH123` and must be skipped.
 
 ## Social downloader facts (measured)
 
