@@ -84,20 +84,40 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
 - YouTube: **do not pin `player_client`**. Pinning a set (the old
   `_YT_CLIENTS = ("android", "ios", "web", "tv_embedded")`) dropped the format
   list to 1; letting yt-dlp choose returned 24+ for the same URL.
-- **YouTube does not download from this host at all** (measured 2026-11-17).
-  Metadata extraction succeeds (44 formats) but every byte-serving path is
-  refused, for every video, not just one. `default` with `b[height<=360]` gives
-  "Requested format is not available"; format `134` (https progressive) gives
-  `HTTP Error 403: Forbidden`; HLS formats `230`/`604` (`m3u8_native`, served
-  from manifest.googlevideo.com) give "The downloaded file is empty". A
-  per-client probe of one video returned 44 formats for `default`, 4 for
-  `android_vr`, and "Sign in to confirm you're not a bot" for `tv`, `ios`,
-  `web_safari`, `mweb`, `tv_simply` and `web_embedded`. So it is a
-  hosting-provider IP block, not a stale client and not a per-video problem:
-  three control videos (`jNQXAC9IVRw`, `dQw4w9WgXcQ`, `aqz-KE-bpKQ`) fail the
-  same way. Cookies do not reliably fix it; the real cure is a different egress
-  address, which is what `SOCIAL_PROXY` is for. SoundCloud (a 4.2 MB m4a) and
-  the TeraBox path work from this same host, so the app itself is fine.
+- **YouTube does not download from this host at all** (measured 2026-11-25).
+  Metadata extraction works - 44 formats come back - but every byte-serving path
+  is refused, for every video, not just one. Progressive media gives
+  `HTTP Error 403: Forbidden` with an empty body; HLS manifests return 200 while
+  every segment inside them is 403; `b[height<=360]` reports "Requested format is
+  not available".
+  Everything that was tried, all still refused:
+  13 player clients (`web`, `web_safari`, `web_creator`, `mweb`, `tv`,
+  `tv_embedded`, `tv_simply`, `ios`, `ipad`, `android`, `android_vr`,
+  `android_music`, `ios_music`); installing `yt-dlp-ejs` and enabling the node
+  runtime so the JS signature challenges actually get solved (the URL then
+  carries a valid `sig`/`lsig` and still 403s); curl_cffi TLS impersonation on
+  the media URL; and rewriting or dropping the URL's `ip` parameter.
+  The decisive test: the same request through an open proxy changes the error
+  from `403` to "Sign in to confirm you're not a bot". So the refusal is bound to
+  the egress address, not to the extractor, the cookies or the account.
+  Control videos `jNQXAC9IVRw`, `dQw4w9WgXcQ` and `aqz-KE-bpKQ` fail identically.
+  SoundCloud (a 4.2 MB m4a) and the TeraBox resolve/download paths work from this
+  same host, so the app itself is fine.
+- The container has **no IPv6 at all** (`/proc/net/if_inet6` empty, AF_INET6
+  connect raises OSError) and a private IPv4 `10.2.49.157`, yet YouTube's media
+  URLs carry an IPv6 `ip=fda3:...` parameter. Do not expect rewrites of that
+  parameter to help - they were measured and they do not.
+- yt-dlp **warns "No supported JavaScript runtime could be found"** unless told
+  about one: deno is its only default and this host has node instead. That
+  warning silently drops formats. `_js_runtime_opts()` now passes
+  `js_runtimes: {"node": {}}` when node exists, and falls back to
+  `remote_components: {"ejs:github"}` when the `yt-dlp-ejs` package is missing
+  (`requirements.txt` now pins it). This is a real config fix even though it
+  cannot beat the address block on its own.
+- Public fallbacks were checked and are all unavailable from here: six Invidious
+  instances (401/403/530/connection refused), five Piped instances (one returns
+  metadata but no `proxyUrl`, rest 502/404), five cobalt instances (JWT required,
+  Cloudflare 1033, timeouts).
 - `_friendly_download_error()` names that hosting block *before* the cookie
   case, because yt-dlp's own text ("403", "Requested format is not available")
   otherwise reaches the user verbatim - the playlist path used to show

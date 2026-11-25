@@ -1585,6 +1585,31 @@ def _impersonate_target():
     return None
 
 
+def _js_runtime_opts() -> dict:
+    """Options that let yt-dlp solve YouTube's player JS challenges.
+
+    Without a JS runtime yt-dlp warns "No supported JavaScript runtime could be
+    found" and silently drops formats: YouTube signs its media URLs with a
+    challenge answered in JS, so the missing signature is what turns into a 403
+    from googlevideo. Deno is yt-dlp's only default, so a host that has node but
+    not deno has to say so. `yt-dlp-ejs` supplies the solver library; when it is
+    absent, ejs:github lets yt-dlp fetch it at runtime.
+    """
+    opts = {}
+    node = shutil.which("node")
+    if node:
+        opts["js_runtimes"] = {"node": {}}
+    if shutil.which("deno"):
+        opts["js_runtimes"] = {**opts.get("js_runtimes", {}), "deno": {}}
+    if not opts:
+        return opts
+    try:
+        import yt_dlp_ejs  # noqa: F401 - presence is what yt-dlp checks
+    except ImportError:
+        opts["remote_components"] = {"ejs:github"}
+    return opts
+
+
 def _base_ydl_opts(*, quiet: bool = True, impersonate: bool = True) -> dict:
     opts = {
         "quiet": quiet,
@@ -1597,6 +1622,7 @@ def _base_ydl_opts(*, quiet: bool = True, impersonate: bool = True) -> dict:
         "retries": 2,
         "http_headers": {"User-Agent": BROWSER_UA},
     }
+    opts.update(_js_runtime_opts())
     if impersonate:
         target = _impersonate_target()
         if target is not None:
@@ -1755,18 +1781,20 @@ def _friendly_download_error(exc: Exception) -> str:
     """Turn a yt-dlp failure into something a user can act on."""
     text = str(exc)
     low = text.lower()
-    # YouTube answers 403, an empty HLS body, or "Requested format is not
-    # available" for every video when the request comes from a hosting provider,
-    # no matter which player client is tried. The generic cookie advice sends
-    # people to a fix that cannot work, so this case is named before the cookie
-    # case below catches "sign in" wording.
+    # YouTube hands metadata to this server but refuses the media itself: the
+    # googlevideo CDN answers 403 (or an empty HLS body) for every video, so a
+    # cookie or extractor fix cannot help. Measured: 13 player clients, injected
+    # JS signature solver, and rewriting the URL's ip param all still 403; the
+    # same request through a proxy changes the error to a bot check instead,
+    # which proves the address is what gets refused. The advice therefore has to
+    # be about the address, not the account.
     hosting_block = ("403" in low or "has not made this content available" in low
                      or "requested format is not available" in low)
     if hosting_block:
-        return ("The site refused this download. YouTube blocks servers like this "
-                "one outright, so its links cannot be fetched here even though other "
-                "sites work. Set SOCIAL_PROXY to route through a proxy, or use a "
-                "different link.")
+        return ("YouTube refuses to serve video to this server's network address, "
+                "so this link cannot be downloaded here. Other sites work. Set "
+                "SOCIAL_PROXY to a proxy address and try again, or run the app "
+                "from a home connection.")
     if "private" in low or "login" in low or "authentication" in low:
         return "This post is private, so it cannot be fetched without an account."
     if "sign in" in low or "bot" in low or "cookies" in low:
