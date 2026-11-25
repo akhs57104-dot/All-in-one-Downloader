@@ -18,9 +18,14 @@ pip install -r requirements.txt
 python3 terabox_app.py          # serves on http://0.0.0.0:12000
 ```
 
-Set `PORT` to change the port. `ffmpeg` on `PATH` is recommended: it lets yt-dlp
-merge separate video and audio tracks for the highest qualities. Without it, only
-single-file (progressive) streams are offered.
+Set `PORT` to change the port. `ffmpeg` lets yt-dlp merge separate video and audio
+tracks for the highest qualities; without it only single-file (progressive) streams
+are offered. The app looks for `bin/ffmpeg` next to `terabox_app.py` first and
+falls back to `PATH`, so a host with no root can install it locally:
+
+```bash
+./tools/fetch-ffmpeg.sh   # static ffmpeg + ffprobe into bin/
+```
 
 ## Deploy
 

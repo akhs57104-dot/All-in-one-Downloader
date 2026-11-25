@@ -795,7 +795,7 @@ def _apply_sponsor_metadata(path: str, timeout: int = 180) -> str:
     if not dot:
         return path
     tagged = f"{stem}.tagged.{ext}"
-    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-c", "copy",
+    cmd = [_ffmpeg_path(), "-y", "-loglevel", "error", "-i", path, "-c", "copy",
            # Without an explicit map, ffmpeg keeps only one stream per type and
            # silently drops extra audio tracks. The `?` suffix makes each map
            # optional so a file lacking subtitles does not fail the remux.
@@ -1535,8 +1535,20 @@ def _ytdlp_available() -> bool:
     return True
 
 
+def _ffmpeg_path() -> str | None:
+    """Locate ffmpeg, preferring the copy shipped beside the app.
+
+    A hosted container often has no ffmpeg on PATH and no root to install one,
+    so `bin/ffmpeg` next to this file is checked first.
+    """
+    local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", "ffmpeg")
+    if os.path.isfile(local) and os.access(local, os.X_OK):
+        return local
+    return shutil.which("ffmpeg")
+
+
 def _ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None
+    return _ffmpeg_path() is not None
 
 
 # yt-dlp picks its own YouTube player clients. Pinning them here used to cut
@@ -1588,6 +1600,9 @@ def _base_ydl_opts(*, quiet: bool = True, impersonate: bool = True) -> dict:
         target = _impersonate_target()
         if target is not None:
             opts["impersonate"] = target
+    ffmpeg = _ffmpeg_path()
+    if ffmpeg:
+        opts["ffmpeg_location"] = ffmpeg
     return opts
 
 

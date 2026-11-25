@@ -19,3 +19,6 @@ keystore.properties
 android/app/build/
 
 # Auth state and per-user accounts
+
+# Static ffmpeg is ~80MB per binary; tools/fetch-ffmpeg.sh downloads it instead
+bin/
