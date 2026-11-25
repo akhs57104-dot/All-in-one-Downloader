@@ -494,7 +494,21 @@ already-installed APKs, so repo and backend must not move simultaneously.
 It states the app collects nothing, which matches the actual permission list
 (INTERNET + ACCESS_NETWORK_STATE only).
 
-- **This machine cannot push to GitHub.** Measured again on 2026-11-17:
+- **The machine's own credentials cannot push; the user's fine-grained PAT can.**
+  On 2026-11-17 the user supplied a fine-grained PAT (`github_pat_11...`) and the
+  push succeeded: `blob create` returned 201, and `ee68963..0f23bf1` landed on
+  `main`. So the `Gh` section below describes the *default* credentials only -
+  when the user hands over a PAT, pushing works. Pass it through the URL form
+  `https://x-access-token:$PAT@github.com/...` for a one-off command, then delete
+  the file holding it and confirm `.git/config` has no token left.
+  Two traps that still bit, exactly as predicted:
+  the PAT had Contents but **not** Workflows, so the first push was rejected with
+  `refusing to allow a Personal Access Token to create or update workflow`. The
+  fix was to push the `no-workflow` series (`push-no-workflow` branch), which
+  omits `.github/workflows/build-apk.yml` and matches what was already on `main`.
+  Its tree hash `a5fe837f13b702d0fe74c6cc5a75c0b6a6ccb959` matched the tested
+  build exactly.
+- **This machine's default credentials cannot push to GitHub.** Measured on 2026-11-17:
   `GITHUB_TOKEN` is a GitHub App installation token (`ghu_` prefix), the API
   reports `permissions.push: true`, `x-oauth-scopes` is empty, ref reads return
   200, but blob creation returns `403 Resource not accessible by integration` and
