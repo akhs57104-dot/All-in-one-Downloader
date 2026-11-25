@@ -1601,10 +1601,29 @@ def _base_ydl_opts(*, quiet: bool = True, impersonate: bool = True) -> dict:
         target = _impersonate_target()
         if target is not None:
             opts["impersonate"] = target
+    # YouTube refuses requests from hosting-provider addresses whatever player
+    # client is used, so the only real cure is a different egress address.
+    proxy = os.environ.get("SOCIAL_PROXY", "").strip()
+    if proxy and not _is_loopback_proxy(proxy):
+        opts["proxy"] = proxy
     ffmpeg = _ffmpeg_path()
     if ffmpeg:
         opts["ffmpeg_location"] = ffmpeg
     return opts
+
+
+def _is_loopback_proxy(proxy: str) -> bool:
+    """True for a proxy pointing back at this box.
+
+    Such a proxy cannot change the egress address, so setting it would only add a
+    hop: yt-dlp would talk to itself and every download would time out.
+    """
+    host = proxy.split("://", 1)[-1].split("@")[-1]
+    if host.startswith("["):  # [::1]:8080 keeps its colon inside the brackets
+        host = host[1:host.index("]")] if "]" in host else host
+    else:
+        host = host.split(":")[0]
+    return host.lower() in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 
 
 def _cookie_file() -> str:
@@ -1736,12 +1755,24 @@ def _friendly_download_error(exc: Exception) -> str:
     """Turn a yt-dlp failure into something a user can act on."""
     text = str(exc)
     low = text.lower()
+    # YouTube answers 403, an empty HLS body, or "Requested format is not
+    # available" for every video when the request comes from a hosting provider,
+    # no matter which player client is tried. The generic cookie advice sends
+    # people to a fix that cannot work, so this case is named before the cookie
+    # case below catches "sign in" wording.
+    hosting_block = ("403" in low or "has not made this content available" in low
+                     or "requested format is not available" in low)
+    if hosting_block:
+        return ("The site refused this download. YouTube blocks servers like this "
+                "one outright, so its links cannot be fetched here even though other "
+                "sites work. Set SOCIAL_PROXY to route through a proxy, or use a "
+                "different link.")
+    if "private" in low or "login" in low or "authentication" in low:
+        return "This post is private, so it cannot be fetched without an account."
     if "sign in" in low or "bot" in low or "cookies" in low:
         return ("This site wants a signed-in session. Instagram, Facebook, "
                 "Reddit and Vimeo often do. Add a cookies.txt via the "
                 "SOCIAL_COOKIES setting and try again.")
-    if "private" in low or "login" in low or "authentication" in low:
-        return "This post is private, so it cannot be fetched without an account."
     if "unsupported url" in low:
         return "That link is not from a supported site."
     if "no video could be found" in low:
@@ -2505,8 +2536,11 @@ def api_social_playlist_download():
                     name = _unique_zip_name(archive, entry, path)
                     archive.write(path, arcname=name)
                 except Exception as exc:  # noqa: BLE001 - one bad item is not fatal
+                    # The raw yt-dlp text ("HTTP Error 403: Forbidden") tells a user
+                    # nothing about whether to retry or give up, so each failure is
+                    # recorded with the same advice the single-item path gives.
                     failures.append({"title": entry["title"],
-                                     "reason": str(exc)[:160]})
+                                     "reason": _friendly_download_error(exc)[:160]})
                 finally:
                     shutil.rmtree(item_dir, ignore_errors=True)
 

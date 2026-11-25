@@ -83,9 +83,28 @@ YouTube/Instagram/Facebook/TikTok/X/Dailymotion and ~25 more sites, and a
 
 - YouTube: **do not pin `player_client`**. Pinning a set (the old
   `_YT_CLIENTS = ("android", "ios", "web", "tv_embedded")`) dropped the format
-  list to 1; letting yt-dlp choose returned 24+ for the same URL. The `web`
-  client is bot-blocked from a datacenter IP, but the default client set already
-  includes ones that work.
+  list to 1; letting yt-dlp choose returned 24+ for the same URL.
+- **YouTube does not download from this host at all** (measured 2026-11-17).
+  Metadata extraction succeeds (44 formats) but every byte-serving path is
+  refused, for every video, not just one. `default` with `b[height<=360]` gives
+  "Requested format is not available"; format `134` (https progressive) gives
+  `HTTP Error 403: Forbidden`; HLS formats `230`/`604` (`m3u8_native`, served
+  from manifest.googlevideo.com) give "The downloaded file is empty". A
+  per-client probe of one video returned 44 formats for `default`, 4 for
+  `android_vr`, and "Sign in to confirm you're not a bot" for `tv`, `ios`,
+  `web_safari`, `mweb`, `tv_simply` and `web_embedded`. So it is a
+  hosting-provider IP block, not a stale client and not a per-video problem:
+  three control videos (`jNQXAC9IVRw`, `dQw4w9WgXcQ`, `aqz-KE-bpKQ`) fail the
+  same way. Cookies do not reliably fix it; the real cure is a different egress
+  address, which is what `SOCIAL_PROXY` is for. SoundCloud (a 4.2 MB m4a) and
+  the TeraBox path work from this same host, so the app itself is fine.
+- `_friendly_download_error()` names that hosting block *before* the cookie
+  case, because yt-dlp's own text ("403", "Requested format is not available")
+  otherwise reaches the user verbatim - the playlist path used to show
+  `HTTP Error 403: Forbidden` and nothing else.
+- `SOCIAL_PROXY` (env) sets yt-dlp's `proxy` for every strategy. A loopback
+  value is ignored on purpose (`_is_loopback_proxy`): it cannot change the
+  egress address, so it would only make yt-dlp talk to itself and time out.
 - Every extractor runs through curl_cffi Chrome impersonation
   (`_impersonate_target()`, cached). yt-dlp needs an `ImpersonateTarget`
   instance, not a string - a string trips an assertion in yt-dlp. This is what
