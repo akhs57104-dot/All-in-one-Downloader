@@ -11,4 +11,11 @@
     <string name="download_started">Download started — check your notifications</string>
     <string name="download_failed">Could not start the download: %1$s</string>
     <string name="no_browser">No app can open that link</string>
+    <string name="update_available_title">Update available</string>
+    <string name="update_required_title">Update required</string>
+    <string name="update_body">Version %1$s is ready. Install it to keep downloads working.</string>
+    <string name="update_now">Update now</string>
+    <string name="update_later">Later</string>
+    <string name="update_downloading">Downloading the update…</string>
+    <string name="update_failed">Could not start the update download</string>
 </resources>

@@ -5,7 +5,7 @@ The Android app is a small native shell around the hosted web app. It lives in
 
 ## What the shell adds over the website
 
-The website already works in any browser. The APK exists for three reasons:
+The website already works in any browser. The APK exists for four reasons:
 
 - **Native downloads.** A 2 GB file goes to Android's `DownloadManager`, so it
   survives the app being backgrounded and shows a progress notification. A
@@ -14,6 +14,26 @@ The website already works in any browser. The APK exists for three reasons:
   Arslan" in the share sheet, so no copy-paste.
 - **Backend that moves.** The server address is read from `api_config.json` at
   launch, so a new Railway account reaches installed apps without a new APK.
+- **In-app updates.** The same config carries `latest_app_version_code` and an
+  `update_url`. When it advertises a build newer than the installed one, the app
+  offers to download it and hands the APK to Android's installer. There is no
+  Play listing, so this is the only way a fix reaches a customer's phone.
+
+## Releasing a new version
+
+The whole release is three steps, and only the last one needs a phone:
+
+1. Bump the code and build, signing with the release keystore:
+   `./gradlew assembleRelease -PappVersionCode=3 -PappVersionName=1.2.0`
+   with `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD` set.
+2. Copy the APK to `dist/`, delete the previous one, and set
+   `latest_app_version_code` / `latest_app_version_name` in `api_config.json` to
+   match. Leave `update_url` empty: the app then downloads from
+   `<backend>/download-apk`. Commit and push.
+3. Installed apps see the new version on their next launch and offer the update.
+
+Set `min_app_version_code` to force the update instead of allowing "Later" —
+use that only when the old build genuinely cannot talk to the current backend.
 
 ## Moving the backend to a new Railway account
 
@@ -48,23 +68,30 @@ left to ask, and users must reinstall. Move them one at a time.
 Play requires every upload signed by the same key forever. The keystore for this
 project is **not** in the repository and must never be.
 
-- Local keystore: `/workspace/keystore/techarslan-release.jks`
-  (alias `techarslan`, RSA 2048, valid 10000 days)
+- Local keystore: `/workspace/keystore/new-release.jks`
+  (alias `techarslan`, RSA 2048, PKCS12, valid 10000 days). The passphrase is in
+  `/workspace/keystore/PASSWORD.txt`, mode 0600, outside the repository.
+- `/workspace/keystore/techarslan-old-UNKNOWN-PASSWORD.jks` is the first keystore.
+  Its passphrase was never recorded and could not be recovered, so it is unusable;
+  keep the file only in case that password turns up somewhere.
 - Back it up somewhere you will still have in five years. Losing it means you
   cannot update the app — you would have to publish a new listing under a new
   package name.
 - For CI, add these repository secrets: `KEYSTORE_BASE64`
-  (`base64 -w0 techarslan-release.jks`), `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
-  `KEY_PASSWORD`. The workflow signs only when `KEYSTORE_BASE64` is present.
+  (`base64 -w0 new-release.jks`), `KEYSTORE_PASSWORD` (contents of `PASSWORD.txt`),
+  `KEY_ALIAS` (`techarslan`), `KEY_PASSWORD` (same as `KEYSTORE_PASSWORD`).
+  The workflow signs only when `KEYSTORE_BASE64` is present.
 
-The current keystore was generated in this session with a placeholder passphrase.
-**Regenerate it before a real Play upload** and store the password in a password
-manager, not in a shell history:
+**Signature break at 1.1.0.** The 1.0.0 APK was signed with the lost keystore, so
+the 1.1.0 build carries a different certificate
+(`d644d6af7840b84bac693068a036e73ed5c54721d237198e9ba3dce790315e72`). Android
+refuses to replace an installed app with one signed by a different key: anyone on
+1.0.0 must uninstall it once, then install 1.1.0. From 1.1.0 onward the in-app
+update works, so this happens once and never again — as long as this keystore is
+kept.
 
-```bash
-keytool -genkeypair -v -keystore my-release.jks -alias techarslan \
-  -keyalg RSA -keysize 2048 -validity 10000
-```
+Back the keystore and `PASSWORD.txt` up somewhere you will still have in five
+years. Losing them again means another forced uninstall for every customer.
 
 ## Building
 

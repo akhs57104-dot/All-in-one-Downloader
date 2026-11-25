@@ -50,6 +50,7 @@ import time
 import urllib.parse
 
 from flask import Flask, Response, jsonify, request, send_file
+from markupsafe import escape
 
 # TeraBox fronts its API with a WAF that can reject Python's TLS fingerprint
 # before it ever reads the headers. curl_cffi impersonates a real browser
@@ -584,8 +585,13 @@ def _hls_playlist(share: dict, chosen: dict):
 
 @app.route("/")
 def index():
-    return Response(INDEX_HTML, mimetype="text/html")
-
+    # `__SPONSOR_*__` are substituted rather than templated: the page is a plain
+    # string and keeping it that way avoids a second escaping layer.
+    page = (INDEX_HTML
+            .replace("__SPONSOR_NAME__", escape(SPONSOR_NAME))
+            .replace("__SPONSOR_URL__", escape(SPONSOR_URL))
+            .replace("__SPONSOR_TAGLINE__", escape(SPONSOR_TAGLINE)))
+    return Response(page, mimetype="text/html")
 
 @app.route("/healthz")
 def healthz():
@@ -615,11 +621,11 @@ h1{font-size:26px;margin-bottom:4px}h2{font-size:18px;margin-top:28px}
 server to resolve it, and the file is downloaded to your device's Downloads folder
 by Android's own download manager.</p>
 
-<h2>What we do not collect</h2>
-<p>We do not create accounts, and we do not ask for your name, email, phone number
-or contacts. We do not read your files, your photos or your SMS. The app requests
-only two Android permissions: internet access, and the ability to check whether a
-network connection exists.</p>
+  <h2>What we do not collect</h2>
+  <p>We do not ask for your name, email address, phone number or contacts. We do not
+  read your files, your photos or your SMS. The app requests only two Android
+  permissions: internet access, and the ability to check whether a network
+  connection exists.</p>
 
 <h2>What is processed</h2>
 <p>The link you submit is sent to our server so it can be resolved, and is held in
@@ -642,8 +648,8 @@ advertisers.</p>
 their data.</p>
 
 <h2>Your control</h2>
-<p>Uninstalling the app removes everything it stored locally. Because we hold no
-account data, there is nothing further for us to delete on your behalf.</p>
+  <p>Uninstalling the app removes everything it stored locally. There is no sign-up and
+  no account, so there is nothing further for us to delete on your behalf.</p>
 
 <h2>Contact</h2>
 <p>Questions about this policy: <a href="mailto:support@techarslan.example">
@@ -725,6 +731,32 @@ def api_resolve():
     except Exception as exc:  # noqa: BLE001 - surfaced to the UI
         return jsonify({"ok": False, "error": f"Unexpected error: {exc}"}), 500
 
+# ---------------------------------------------------------------------------
+# Sponsor branding
+# ---------------------------------------------------------------------------
+#
+# Every file this app hands out should carry the sponsor. Three layers, because
+# no single one covers every path:
+#
+#   1. Filename  - works for every download, costs nothing, already applied by
+#                  `_branded()`. Survives being copied off the phone.
+#   2. Metadata  - title/artist/comment tags written with `-c copy`, so the file
+#                  is remuxed without re-encoding: a 2 GB video gains tags in a
+#                  few seconds and loses no quality. Visible in VLC, MX Player,
+#                  Windows Explorer and any "file info" screen.
+#   3. On-screen - a sponsor badge in the app's own player, so the branding is
+#                  seen during playback as well as in the file.
+#
+# What is deliberately *not* done: burning a logo into the pixels. That needs a
+# full re-encode, which on a free host means minutes of CPU per file and would
+# make a 2 GB download impractical. Set SPONSOR_BURN_IN=1 to opt in anyway on a
+# machine with the CPU to spare.
+
+SPONSOR_NAME = os.environ.get("SPONSOR_NAME", "Tech Arslan Software Solutions")
+SPONSOR_URL = os.environ.get("SPONSOR_URL", "https://github.com/akhs57104-dot/All-in-one-Downloader")
+SPONSOR_TAGLINE = os.environ.get("SPONSOR_TAGLINE", "Downloaded with Tech Arslan Downloader")
+SPONSOR_BURN_IN = os.environ.get("SPONSOR_BURN_IN", "").lower() in {"1", "true", "yes", "on"}
+
 BRAND_SUFFIX = "Powered by Tech Arslan Software Solutions"
 
 
@@ -736,6 +768,127 @@ def _branded(filename: str) -> str:
     if dot and stem and len(ext) <= 5 and ext.isalnum():
         return f"{stem} - {BRAND_SUFFIX}.{ext}"
     return f"{filename} - {BRAND_SUFFIX}"
+
+
+def _sponsor_tags() -> list[str]:
+    """ffmpeg metadata arguments carrying the sponsor credit."""
+    return [
+        "-metadata", f"title={SPONSOR_TAGLINE}",
+        "-metadata", f"artist={SPONSOR_NAME}",
+        "-metadata", f"album={SPONSOR_NAME}",
+        "-metadata", f"comment={SPONSOR_TAGLINE} - {SPONSOR_URL}",
+        "-metadata", f"copyright={SPONSOR_NAME}",
+        "-metadata", f"encoded_by={SPONSOR_NAME}",
+    ]
+
+
+def _apply_sponsor_metadata(path: str, timeout: int = 180) -> str:
+    """Write sponsor tags into a finished media file, without re-encoding.
+
+    Returns the path to use. On any failure the original is returned untouched,
+    because a download with no tags is far better than a failed download.
+    """
+    if not _ffmpeg_available():
+        return path
+    stem, dot, ext = path.rpartition(".")
+    if not dot:
+        return path
+    tagged = f"{stem}.tagged.{ext}"
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-c", "copy",
+           # Without an explicit map, ffmpeg keeps only one stream per type and
+           # silently drops extra audio tracks. The `?` suffix makes each map
+           # optional so a file lacking subtitles does not fail the remux.
+           "-map", "0:v?", "-map", "0:a?", "-map", "0:s?",
+           "-map_metadata", "-1", *_sponsor_tags()]
+    if ext.lower() in {"mp4", "m4v", "mov"}:
+        # Put the index at the front so the file streams before it is fully
+        # downloaded, which is what makes playback start instantly on a phone.
+        cmd += ["-movflags", "+faststart"]
+    cmd.append(tagged)
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        if result.returncode == 0 and os.path.exists(tagged) and os.path.getsize(tagged) > 0:
+            os.replace(tagged, path)
+            return path
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        if os.path.exists(tagged):
+            os.remove(tagged)
+    except OSError:
+        pass
+    return path
+
+
+# A download is buffered and tagged only when it is small enough to be worth the
+# disk churn. Above this, the file streams straight through with filename
+# branding, because a free host has neither the disk nor the time to spool a
+# multi-gigabyte video twice.
+SPONSOR_TAG_LIMIT = int(os.environ.get("SPONSOR_TAG_LIMIT_MB", "300")) * 1024 * 1024
+
+
+def _tagged_download(upstream, filename: str, content_type: str | None,
+                     prefix: bytes = b""):
+    """Buffer a video, write sponsor tags, and stream it from disk.
+
+    Returns a Response, or None when this download should be proxied instead
+    (too large, unknown size, not a video, or a ranged/resume request, all of
+    which need byte-exact passthrough rather than a rewritten file).
+
+    `prefix` carries bytes the caller already pulled off the stream while
+    sniffing the container, so they are written back before the rest. The
+    upstream's Content-Length still covers the whole file, so it is unchanged.
+    """
+    if not _ffmpeg_available() or SPONSOR_TAG_LIMIT <= 0:
+        return None
+    if request.headers.get("Range"):
+        return None
+    try:
+        length = int(upstream.headers.get("Content-Length") or 0)
+    except (TypeError, ValueError):
+        return None
+    if length <= 0 or length > SPONSOR_TAG_LIMIT:
+        return None
+    if not (content_type or "").startswith("video/"):
+        return None
+
+    workdir = tempfile.mkdtemp(prefix="brand-")
+    stem, dot, ext = filename.rpartition(".")
+    if not dot:
+        ext, stem = "mp4", filename
+    path = os.path.join(workdir, f"media.{ext}")
+    try:
+        with open(path, "wb") as fh:
+            if prefix:
+                fh.write(prefix)
+            for chunk in upstream.iter_content(chunk_size=256 * 1024):
+                if chunk:
+                    fh.write(chunk)
+    except Exception:  # noqa: BLE001 - fall back to a plain proxy
+        shutil.rmtree(workdir, ignore_errors=True)
+        return None
+    finally:
+        upstream.close()
+
+    _apply_sponsor_metadata(path)
+
+    def body():
+        try:
+            with open(path, "rb") as fh:
+                while True:
+                    chunk = fh.read(256 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    quoted = urllib.parse.quote(_branded(filename))
+    return Response(body(), headers={
+        "Content-Type": content_type or "video/mp4",
+        "Content-Length": str(os.path.getsize(path)),
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quoted}",
+    })
 
 
 def _proxy_stream(upstream, *, as_attachment: bool, filename: str,
@@ -832,6 +985,11 @@ def _serve(link: str, fs_id: str, *, mode: str):
                 headers["Range"] = request.headers["Range"]
             upstream = session.get(dlink, headers=headers, stream=True, timeout=60)
             if upstream.status_code in (200, 206):
+                tagged = _tagged_download(
+                    upstream, chosen["name"],
+                    upstream.headers.get("Content-Type"))
+                if tagged is not None:
+                    return tagged
                 return _proxy_stream(upstream, as_attachment=True,
                                      filename=chosen["name"])
             upstream.close()
@@ -863,6 +1021,11 @@ def _serve(link: str, fs_id: str, *, mode: str):
                         filename = name
                         content_type = upstream.headers.get(
                             "Content-Type", "application/octet-stream")
+                    if kind:
+                        tagged = _tagged_download(upstream, filename,
+                                                  content_type, prefix=head)
+                        if tagged is not None:
+                            return tagged
                     return _proxy_stream(upstream, as_attachment=True,
                                          filename=filename,
                                          content_type=content_type,
@@ -2137,6 +2300,11 @@ def api_social_download():
             return jsonify({"ok": False, "error": f"The source returned status "
                             f"{upstream.status_code}."}), 400
         filename = f"{safe}.{spec['ext']}"
+        tagged = _tagged_download(
+            upstream, filename,
+            upstream.headers.get("Content-Type") or "video/mp4")
+        if tagged is not None:
+            return tagged
         return _proxy_stream(upstream, as_attachment=True, filename=filename)
 
     # Anything that is not a single ready file - a video-only stream, an HLS
@@ -2153,6 +2321,7 @@ def api_social_download():
 
         filename = f"{safe}.mp4"
         branded = _branded(filename)
+        path = _apply_sponsor_metadata(path)
 
         def stream_and_cleanup():
             try:
@@ -2233,6 +2402,45 @@ INDEX_HTML = """<!doctype html>
        display:flex;flex-direction:column;align-items:center;padding:0 0 56px;-webkit-font-smoothing:antialiased;
        text-rendering:optimizeLegibility;}
   .app{width:100%;max-width:820px;padding:24px 16px 0;}
+
+  /* sponsor badge: the on-screen credit shown during playback */
+  .sponsor-badge{position:absolute;top:12px;right:14px;z-index:4;
+    display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
+    text-decoration:none;font-size:.7rem;font-weight:700;
+    color:rgba(232,238,248,.9);background:rgba(10,16,28,.62);
+    border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(8px);
+    -webkit-backdrop-filter:blur(8px);opacity:.72;
+    transition:opacity .25s ease,transform .2s ease,background .2s ease;}
+  .sponsor-badge:hover{opacity:1;transform:translateY(-1px);
+    background:rgba(10,16,28,.88);border-color:rgba(56,189,248,.5);}
+  .sb-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0;
+    box-shadow:0 0 0 0 rgba(56,189,248,.7);animation:sbPulse 2.6s ease-out infinite;}
+  @keyframes sbPulse{0%{box-shadow:0 0 0 0 rgba(56,189,248,.6);}
+    70%{box-shadow:0 0 0 7px rgba(56,189,248,0);}100%{box-shadow:0 0 0 0 rgba(56,189,248,0);}}
+  .sb-text{white-space:nowrap;max-width:230px;overflow:hidden;text-overflow:ellipsis;}
+  @media (max-width:560px){.sponsor-badge{top:8px;right:8px;font-size:.64rem;padding:5px 9px;}
+    .sb-text{max-width:150px;}}
+
+  /* entrance: content settles in instead of snapping into place */
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
+  .app > *{animation:fadeUp .42s cubic-bezier(.22,1,.36,1) both;}
+  .app > *:nth-child(2){animation-delay:.05s;}
+  .app > *:nth-child(3){animation-delay:.09s;}
+  .app > *:nth-child(4){animation-delay:.13s;}
+
+  /* tactile press feedback on every actionable control */
+  .btn:active,.icon-btn:active,.chip:active,.tab:active{transform:scale(.975);}
+  .btn,.icon-btn,.chip,.tab{transition:transform .13s ease,background .16s ease,
+    border-color .16s ease,color .16s ease,box-shadow .18s ease;}
+
+  /* visible keyboard focus, which a dark theme otherwise swallows */
+  :where(a,button,input,select,textarea,[tabindex]):focus-visible{
+    outline:2px solid var(--accent);outline-offset:2px;border-radius:8px;}
+
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+      transition-duration:.01ms!important;scroll-behavior:auto!important;}
+  }
 
   /* topbar: full-width sticky bar so the brand stays visible while scrolling */
   .topbar{position:sticky;top:0;z-index:20;width:100%;padding:14px 16px;border-bottom:1px solid var(--border);
@@ -2786,6 +2994,11 @@ INDEX_HTML = """<!doctype html>
         <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
       </button>
       <div class="toast" id="toast"></div>
+      <a class="sponsor-badge" id="sponsorBadge" href="__SPONSOR_URL__"
+         target="_blank" rel="noopener" title="__SPONSOR_NAME__">
+        <span class="sb-dot"></span>
+        <span class="sb-text">__SPONSOR_TAGLINE__</span>
+      </a>
       <div class="controls" id="controls">
         <div class="progress" id="progress">
           <div class="track">

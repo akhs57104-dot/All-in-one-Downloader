@@ -434,6 +434,33 @@ address, so the account has to be created by its owner. Build the deploy script,
 verify its request shape against the API's own schema, and hand over the one
 command - do not claim a deploy happened when only the script exists.
 
+## Android updates
+
+There is no Play listing, so an installed APK cannot be updated by the store. The
+shell reads `api_config.json` at launch and compares `latest_app_version_code`
+against its own `versionCode`; when the config is newer it offers a download from
+`update_url`, or `<backend>/download-apk` when that is empty. Shipping a release is
+therefore: build with a bumped `-PappVersionCode`, drop the APK in `dist/`, bump the
+two `latest_app_*` fields, commit, push. The signing keystore lives outside the
+repository in `/workspace/keystore/`; losing it forces every customer to uninstall
+before they can install the next build, because Android will not replace an app
+signed by a different key.
+
+## Sponsor branding
+
+Every download carries the sponsor in three layers: the filename (`_branded`),
+container metadata (`_apply_sponsor_metadata`, ffmpeg `-c copy` so there is no
+re-encode and no quality loss), and an on-screen badge in the player. Tagging is
+skipped for ranged requests, non-video content, and anything above
+`SPONSOR_TAG_LIMIT_MB` (default 300), because a free host cannot spool a
+multi-gigabyte file twice. Pixel burn-in is off by default; `SPONSOR_BURN_IN=1`
+opts in, but it re-encodes and will time out on large files.
+
+`_tagged_download` takes a `prefix` argument. The helper path sniffs the first
+64 KB to learn the container, so those bytes must be written back before the
+rest or the file silently loses its header. This was a real bug; keep the
+argument wired at the call site.
+
 ## Conventions
 
 - Keep it a single file; no build step.

@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -84,6 +85,7 @@ public class MainActivity extends Activity {
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private String backend;
     private boolean pageFailed;
+    private boolean updatePrompted;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -288,10 +290,12 @@ public class MainActivity extends Activity {
         io.execute(() -> {
             String resolved = null;
             String note = null;
+            JSONObject config = null;
 
             // 1. The switch file on GitHub. This is the whole point: a new
             //    Railway URL reaches existing installs from here.
-            String remote = fetchConfigBackend(CONFIG_RAW_URL);
+            config = fetchConfig(CONFIG_RAW_URL);
+            String remote = backendFromConfig(config);
             if (remote != null && healthy(remote)) {
                 resolved = remote;
             }
@@ -301,9 +305,11 @@ public class MainActivity extends Activity {
             if (resolved == null) {
                 String cached = prefs.getString(KEY_BACKEND, null);
                 if (cached != null && !cached.isEmpty()) {
-                    String served = fetchConfigBackend(cached + "/api/app-config");
+                    JSONObject servedConfig = fetchConfig(cached + "/api/app-config");
+                    String served = backendFromConfig(servedConfig);
                     if (served != null && healthy(served)) {
                         resolved = served;
+                        config = servedConfig;
                     } else if (healthy(cached)) {
                         resolved = cached;
                     }
@@ -322,6 +328,7 @@ public class MainActivity extends Activity {
 
             final String chosen = resolved;
             final String failure = note;
+            final JSONObject configForUpdate = config;
             runOnUiThread(() -> {
                 if (chosen == null) {
                     spinner.setVisibility(View.GONE);
@@ -331,12 +338,16 @@ public class MainActivity extends Activity {
                 backend = chosen;
                 prefs.edit().putString(KEY_BACKEND, chosen).apply();
                 loadSite();
+                maybeOfferUpdate(configForUpdate);
             });
         });
     }
 
-    /** Read `backend_url` from a config document, tolerating both shapes it comes in. */
-    private String fetchConfigBackend(String url) {
+    /**
+     * Read a config document, tolerating both shapes it comes in: GitHub raw serves the
+     * file itself, while our own route wraps it in {"ok":true,"config":{...}}.
+     */
+    private JSONObject fetchConfig(String url) {
         HttpURLConnection conn = null;
         try {
             conn = (HttpURLConnection) new URL(url).openConnection();
@@ -348,20 +359,8 @@ public class MainActivity extends Activity {
             }
             String body = readAll(conn.getInputStream());
             JSONObject json = new JSONObject(body);
-            // GitHub raw serves the file itself; our own route wraps it in
-            // {"ok":true,"config":{...}}. Accept either.
             JSONObject config = json.optJSONObject("config");
-            if (config == null) {
-                config = json;
-            }
-            String value = config.optString("backend_url", "").trim();
-            if (value.isEmpty()) {
-                return null;
-            }
-            while (value.endsWith("/")) {
-                value = value.substring(0, value.length() - 1);
-            }
-            return isHttpUrl(value) ? value : null;
+            return config != null ? config : json;
         } catch (Exception ignored) {
             return null;
         } finally {
@@ -369,6 +368,21 @@ public class MainActivity extends Activity {
                 conn.disconnect();
             }
         }
+    }
+
+    /** Pull `backend_url` out of a config document, or null when it is missing or bogus. */
+    private String backendFromConfig(JSONObject config) {
+        if (config == null) {
+            return null;
+        }
+        String value = config.optString("backend_url", "").trim();
+        if (value.isEmpty()) {
+            return null;
+        }
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        return isHttpUrl(value) ? value : null;
     }
 
     /** Accept only real web URLs; `startsWith("http")` alone would allow `httpfoo:`. */
@@ -488,6 +502,100 @@ public class MainActivity extends Activity {
         errorText.setText(message == null ? getString(R.string.offline_body) : message);
         errorPanel.setVisibility(View.VISIBLE);
         webView.setVisibility(View.INVISIBLE);
+    }
+
+    // ---------------------------------------------------------------------
+    // Self-update
+    // ---------------------------------------------------------------------
+
+    /**
+     * Offer a newer build when the config advertises one.
+     *
+     * The APK is not on Play, so nothing updates it automatically. Without this the
+     * only way to ship a fix is to ask every customer to reinstall by hand. The
+     * download goes through DownloadManager, and Android shows its own "install
+     * unknown app" prompt when the user taps the finished notification - the app
+     * cannot install silently, and should not want to.
+     */
+    private void maybeOfferUpdate(JSONObject config) {
+        if (config == null || updatePrompted || isFinishing()) {
+            return;
+        }
+        final int latest = config.optInt("latest_app_version_code", 0);
+        final String latestName = config.optString("latest_app_version_name", "").trim();
+        String url = config.optString("update_url", "").trim();
+        if (url.isEmpty() && backend != null) {
+            // Empty update_url means "the APK this backend serves", so a release is
+            // just a new file in dist/ plus a version bump in the config.
+            url = backend + "/download-apk";
+        }
+        final int minVersion = config.optInt("min_app_version_code", 0);
+        final String note = config.optString("message", "").trim();
+
+        if (latest <= 0 || !isHttpUrl(url)) {
+            return;
+        }
+        final String updateUrl = url;
+        int current = installedVersionCode();
+        if (current <= 0 || latest <= current) {
+            return;
+        }
+        updatePrompted = true;
+
+        // Below the minimum the old build no longer works against this backend, so
+        // the prompt is not dismissible - cancelling would only reach a broken app.
+        boolean required = current < minVersion;
+        String title = getString(required ? R.string.update_required_title
+                                          : R.string.update_available_title);
+        StringBuilder body = new StringBuilder(getString(R.string.update_body,
+                latestName.isEmpty() ? String.valueOf(latest) : latestName));
+        if (!note.isEmpty()) {
+            body.append("\n\n").append(note);
+        }
+
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(body.toString())
+                .setCancelable(!required)
+                .setPositiveButton(R.string.update_now, (d, w) -> downloadUpdate(updateUrl))
+                .setNegativeButton(R.string.update_later, null);
+        if (required) {
+            dialog.setNegativeButton(null, null);
+        }
+        dialog.show();
+    }
+
+    private int installedVersionCode() {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return Build.VERSION.SDK_INT >= 28 ? (int) info.getLongVersionCode()
+                                               : info.versionCode;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private void downloadUpdate(String url) {
+        try {
+            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+            request.setTitle(getString(R.string.app_name));
+            request.setDescription(getString(R.string.update_downloading));
+            request.setMimeType("application/vnd.android.package-archive");
+            request.setNotificationVisibility(
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            // The APK must land in app-external storage for the system installer to
+            // read it, and Downloads keeps it visible so the user can retry.
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS,
+                    "TechArslan-update.apk");
+            DownloadManager manager =
+                    (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            if (manager != null) {
+                manager.enqueue(request);
+                Toast.makeText(this, R.string.update_downloading, Toast.LENGTH_LONG).show();
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, R.string.update_failed, Toast.LENGTH_LONG).show();
+        }
     }
 
     private void showServerDialog() {

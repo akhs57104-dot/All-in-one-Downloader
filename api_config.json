@@ -1,10 +1,12 @@
 {
-  "_comment": "The one switch that moves every installed app to a new backend. Change backend_url here, commit, push - no APK rebuild, no reinstall. The app reads this file from GitHub raw on every launch.",
-  "backend_url": "https://web-production-ac65b984.up.railway.app",
-  "fallback_urls": [],
+  "_comment": "The one switch that moves every installed app to a new backend, and tells it when a newer APK exists. Change backend_url or latest_app_version_code here, commit, push - no APK rebuild, no reinstall. The app reads this file from GitHub raw on every launch.",
+  "backend_url": "https://work-1-wcqnygvsjfbxdklm.prod-runtime.all-hands.dev",
+  "fallback_urls": [
+    "https://web-production-ac65b984.up.railway.app"
+  ],
   "min_app_version_code": 1,
-  "latest_app_version_code": 1,
-  "latest_app_version_name": "1.0.0",
+  "latest_app_version_code": 2,
+  "latest_app_version_name": "1.1.0",
   "update_url": "",
   "message": ""
 }

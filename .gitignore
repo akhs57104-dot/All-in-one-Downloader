@@ -17,3 +17,5 @@ keystore.properties
 
 # Keep build artifacts out of git; /download-apk reads dist/ on the server
 android/app/build/
+
+# Auth state and per-user accounts
